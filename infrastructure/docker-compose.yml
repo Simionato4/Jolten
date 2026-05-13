@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # 1. Broker MQTT (Mosquitto)
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iot_mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./data/mosquitto_data:/mosquitto/data
+      - ./data/mosquitto_log:/mosquitto/log
+    restart: unless-stopped
+
+  # 2. Banco de Dados Time-Series (InfluxDB v2)
+  influxdb:
+    image: influxdb:2
+    container_name: iot_influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - ./data/influxdb_data:/var/lib/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=gestor
+      - DOCKER_INFLUXDB_INIT_PASSWORD=senha_segura_123 # Altere em produção
+      - DOCKER_INFLUXDB_INIT_ORG=unimater
+      - DOCKER_INFLUXDB_INIT_BUCKET=energia_salas
+    restart: unless-stopped
+
+  # 3. Dashboard (Grafana)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: iot_grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data/grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin # Altere em produção
+    depends_on:
+      - influxdb
+    restart: unless-stopped
+
+  # =========================================================
+  # 4. Zigbee2MQTT (Bridge) 
+  # ATENÇÃO: Mantenha comentado enquanto estiver no Windows.
+  # Descomente quando for rodar no Raspberry Pi com o Dongle USB.
+  # =========================================================
+  # zigbee2mqtt:
+  #   image: koenkk/zigbee2mqtt:latest
+  #   container_name: iot_zigbee2mqtt
+  #   volumes:
+  #     - ./data/zigbee2mqtt_data:/app/data
+  #   devices:
+  #     - /dev/ttyUSB0:/dev/ttyUSB0 # Caminho do Sonoff USB no Raspberry Pi
+  #   ports:
+  #     - "8080:8080"
+  #   depends_on:
+  #     - mosquitto
+  #   restart: unless-stopped

@@ -1,0 +1,104 @@
+import os
+import time
+import paho.mqtt.client as mqtt
+from dotenv import load_dotenv
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CallbackQueryHandler
+
+load_dotenv()
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("GESTOR_CHAT_ID")
+
+BROKER = "localhost"
+PORT = 1883
+TIMEOUT_TESTE = 30 # Segundos (No projeto final será 3600 = 60 minutos)
+
+salas = {
+    "101": {"ultimo_movimento": time.time(), "alerta_enviado": False}
+}
+
+mqtt_client = mqtt.Client("Backend_Orquestrador")
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("✅ MQTT Conectado com sucesso!")
+        client.subscribe("sala/+/ocupacao")
+
+def on_message(client, userdata, msg):
+    topico = msg.topic
+    payload = msg.payload.decode('utf-8')
+    print(f"📡 Sensor disparou -> {topico}: {payload}")
+    
+    partes = topico.split("/")
+    if len(partes) == 3 and partes[2] == "ocupacao":
+        sala_id = partes[1]
+        
+        if payload == "1" or payload.lower() == "true":
+            if sala_id in salas:
+                salas[sala_id]["ultimo_movimento"] = time.time()
+                salas[sala_id]["alerta_enviado"] = False
+                print(f"⏱️ Movimento detectado! Cronômetro da Sala {sala_id} foi resetado.")
+
+async def checar_timeouts(context):
+    agora = time.time()
+    for sala_id, dados in salas.items():
+        tempo_vazia = agora - dados["ultimo_movimento"]
+        
+        if tempo_vazia > TIMEOUT_TESTE and not dados["alerta_enviado"]:
+            print(f"⚠️ Sala {sala_id} estourou o timeout! Enviando alerta via Telegram...")
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("💡 Ligar", callback_data=f"ligar_{sala_id}"),
+                    InlineKeyboardButton("🛑 Desligar", callback_data=f"desligar_{sala_id}")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            mensagem = f"⚠️ *Alerta:* A Sala {sala_id} está vazia há mais de {TIMEOUT_TESTE} segundos. Deseja desligar os equipamentos?"
+            
+            await context.bot.send_message(
+                chat_id=CHAT_ID, 
+                text=mensagem, 
+                reply_markup=reply_markup, 
+                parse_mode='Markdown'
+            )
+            salas[sala_id]["alerta_enviado"] = True
+
+async def button_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+    
+    acao, sala_id = query.data.split("_")
+    
+    if acao == "desligar":
+        mqtt_client.publish(f"sala/{sala_id}/comando", "OFF")
+        novo_texto = f"🛑 *Ação executada:* Cargas da Sala {sala_id} foram DESLIGADAS remotamente."
+    else:
+        mqtt_client.publish(f"sala/{sala_id}/comando", "ON")
+        novo_texto = f"💡 *Ação executada:* Cargas da Sala {sala_id} foram LIGADAS remotamente."
+        
+    await query.edit_message_text(text=novo_texto, parse_mode='Markdown')
+
+def iniciar_orquestrador():
+    if not TOKEN or not CHAT_ID:
+        print("❌ Erro fatal: Verifique seu arquivo .env! Estão faltando credenciais.")
+        return
+        
+    mqtt_client.on_connect = on_connect
+    mqtt_client.on_message = on_message
+    mqtt_client.connect(BROKER, PORT, 60)
+    mqtt_client.loop_start() 
+    
+    app = (Application.builder()
+                      .token(TOKEN)
+                      .read_timeout(30).write_timeout(30).connect_timeout(30)
+                      .build())
+    
+    app.job_queue.run_repeating(checar_timeouts, interval=10, first=5)
+    app.add_handler(CallbackQueryHandler(button_callback))
+    
+    print("🚀 Orquestrador IoT Iniciado! Monitorando as salas...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    iniciar_orquestrador()

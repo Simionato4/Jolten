@@ -1,0 +1,36 @@
+# ==========================================
+# 1. Infraestrutura e Docker
+# ==========================================
+infrastructure/data/
+
+.env
+infrastructure/.env
+
+# ==========================================
+# 2. Firmware
+# ==========================================
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+firmware/dependencies.lock
+
+# ==========================================
+# 3. Python / Backend
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+backend/venv/
+backend/.venv/
+venv/
+.env/
+pip-log.txt
+
+# ==========================================
+# 4. IDEs e Sistema Operacional
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
