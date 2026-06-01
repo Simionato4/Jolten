@@ -4,14 +4,27 @@ import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
 
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("GESTOR_CHAT_ID")
-
 BROKER = "localhost"
 PORT = 1883
-TIMEOUT_TESTE = 30 # Segundos (No projeto final será 3600 = 60 minutos)
+TIMEOUT_TESTE = 30
+
+INFLUX_URL    = os.getenv("INFLUX_URL")
+INFLUX_TOKEN  = os.getenv("INFLUX_TOKEN")
+INFLUX_ORG    = os.getenv("INFLUX_ORG")
+INFLUX_BUCKET = os.getenv("INFLUX_BUCKET")
+
+try:
+    db_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+    write_api = db_client.write_api(write_options=SYNCHRONOUS)
+    print("✅ InfluxDB Configurado!")
+except Exception as e:
+    print(f"❌ Erro no InfluxDB: {e}")
 
 salas = {
     "101": {"ultimo_movimento": time.time(), "alerta_enviado": False}
@@ -27,17 +40,24 @@ def on_connect(client, userdata, flags, rc):
 def on_message(client, userdata, msg):
     topico = msg.topic
     payload = msg.payload.decode('utf-8')
-    print(f"📡 Sensor disparou -> {topico}: {payload}")
+    print(f"📡 MQTT Recebido -> {topico}: {payload}")
     
     partes = topico.split("/")
     if len(partes) == 3 and partes[2] == "ocupacao":
         sala_id = partes[1]
+        valor_movimento = int(payload) if payload.isdigit() else (1 if payload.lower() == "true" else 0)
+
+        try:
+            ponto = Point("sensor_pir").tag("sala", sala_id).field("movimento", valor_movimento)
+            write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=ponto)
+            print(f"💾 Dado salvo no banco: Sala {sala_id} | Movimento: {valor_movimento}")
+        except Exception as e:
+            print(f"❌ Erro ao salvar no banco: {e}")
         
-        if payload == "1" or payload.lower() == "true":
+        if valor_movimento == 1:
             if sala_id in salas:
                 salas[sala_id]["ultimo_movimento"] = time.time()
                 salas[sala_id]["alerta_enviado"] = False
-                print(f"⏱️ Movimento detectado! Cronômetro da Sala {sala_id} foi resetado.")
 
 async def checar_timeouts(context):
     agora = time.time()
