@@ -1,6 +1,8 @@
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -9,93 +11,151 @@
 #include "esp_wifi.h"
 #include "mqtt_client.h"
 
-#define WIFI_SSID       "NOME_DA_SUA_REDE_WIFI"
-#define WIFI_PASS       "SENHA_DA_REDE"
-#define BROKER_URL      "mqtt://192.168.56.1"
+#define WIFI_SSID        "DW-FATIMA"
+#define WIFI_PASS        "simi4271"
+#define BROKER_URL       "mqtt://192.168.3.88"
+#define SALA_ID          "101"
 
-#define PIR_SENSOR_PIN    2 // Entrada: Sensor de movimento HC-SR501
-#define LIGHT_SENSOR_PIN  3 // Entrada: Sensor de luminosidade LDR
-#define RELAY_LIGHT_PIN   4 // Saída: Relé de Iluminação
+#define PIR_SENSOR_PIN   2
+#define RELAY_LIGHT_PIN  4
+
+#define WIFI_CONNECTED_BIT BIT0
 
 static const char *TAG = "SISTEMA_EDGE";
-esp_mqtt_client_handle_t client = NULL;
+static esp_mqtt_client_handle_t client = NULL;
+static EventGroupHandle_t s_wifi_event_group;
+
+// --- WiFi ---
+
+static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        ESP_LOGW(TAG, "WiFi desconectado. Reconectando...");
+        esp_wifi_connect();
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *) data;
+        ESP_LOGI(TAG, "✅ WiFi conectado! IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    }
+}
 
 static void wifi_init_sta(void) {
-    esp_netif_init();
-    esp_event_loop_create_default();
+    s_wifi_event_group = xEventGroupCreate();
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
 
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = WIFI_SSID,
-            .password = WIFI_PASS,
-        },
-    };
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-    esp_wifi_start();
-    esp_wifi_connect();
-    ESP_LOGI(TAG, "Conectando ao WiFi...");
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL);
+    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL);
+
+    wifi_config_t wifi_config = { .sta = { .ssid = WIFI_SSID, .password = WIFI_PASS } };
+    wifi_country_t country = { .cc = "BR", .schan = 1, .nchan = 13, .policy = WIFI_COUNTRY_POLICY_MANUAL };
+
+    ESP_ERROR_CHECK(esp_wifi_set_country(&country));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "Aguardando WiFi...");
+    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(20000));
+}
+
+// --- MQTT ---
+
+static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
+    esp_mqtt_event_handle_t event = data;
+
+    switch (id) {
+        case MQTT_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "✅ MQTT Conectado!");
+            esp_mqtt_client_subscribe(client, "sala/" SALA_ID "/comando", 0);
+            ESP_LOGI(TAG, "📡 Inscrito em: sala/" SALA_ID "/comando");
+            break;
+
+        case MQTT_EVENT_DATA: {
+            char topico[64] = {0};
+            char payload[32] = {0};
+            strncpy(topico, event->topic, event->topic_len);
+            strncpy(payload, event->data, event->data_len);
+            ESP_LOGI(TAG, "📩 Comando recebido: %s → %s", topico, payload);
+
+            if (strcmp(payload, "ON") == 0) {
+                gpio_set_level(RELAY_LIGHT_PIN, 1);
+                ESP_LOGI(TAG, "💡 Relé LIGADO via Telegram");
+            } else if (strcmp(payload, "OFF") == 0) {
+                gpio_set_level(RELAY_LIGHT_PIN, 0);
+                ESP_LOGI(TAG, "🛑 Relé DESLIGADO via Telegram");
+            }
+            break;
+        }
+
+        case MQTT_EVENT_DISCONNECTED:
+            ESP_LOGW(TAG, "MQTT desconectado.");
+            break;
+
+        default:
+            break;
+    }
 }
 
 static void mqtt_app_start(void) {
-    esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = BROKER_URL,
-    };
+    esp_mqtt_client_config_t mqtt_cfg = { .broker.address.uri = BROKER_URL };
     client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(client);
-    ESP_LOGI(TAG, "Conectando ao Broker MQTT...");
+    ESP_LOGI(TAG, "Conectando ao Broker MQTT em %s...", BROKER_URL);
 }
 
-void iniciar_gpios() {
+// --- GPIOs ---
+
+void iniciar_gpios(void) {
     gpio_reset_pin(RELAY_LIGHT_PIN);
     gpio_set_direction(RELAY_LIGHT_PIN, GPIO_MODE_OUTPUT);
-    
+    gpio_set_level(RELAY_LIGHT_PIN, 1);
+
     gpio_reset_pin(PIR_SENSOR_PIN);
     gpio_set_direction(PIR_SENSOR_PIN, GPIO_MODE_INPUT);
     gpio_set_pull_mode(PIR_SENSOR_PIN, GPIO_PULLDOWN_ONLY);
 
-    gpio_reset_pin(LIGHT_SENSOR_PIN);
-    gpio_set_direction(LIGHT_SENSOR_PIN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(LIGHT_SENSOR_PIN, GPIO_PULLDOWN_ONLY);
-
-    ESP_LOGI(TAG, "GPIOs inicializados com sucesso.");
+    ESP_LOGI(TAG, "GPIOs inicializados.");
 }
+
+// --- Main ---
 
 void app_main(void) {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      ret = nvs_flash_init();
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
-    
+    ESP_ERROR_CHECK(ret);
+
     iniciar_gpios();
     wifi_init_sta();
-    vTaskDelay(pdMS_TO_TICKS(5000));
     mqtt_app_start();
 
-    int ultimo_estado_movimento = -1;
+    int ultimo_movimento = -1;
+    char topico[64];
+    snprintf(topico, sizeof(topico), "sala/%s/ocupacao", SALA_ID);
 
     while (1) {
-        int movimento    = gpio_get_level(PIR_SENSOR_PIN);
-        int luminosidade = gpio_get_level(LIGHT_SENSOR_PIN);
-        
-        if (movimento != ultimo_estado_movimento) {
-            ultimo_estado_movimento = movimento;
+        int movimento = gpio_get_level(PIR_SENSOR_PIN);
+
+        if (movimento != ultimo_movimento) {
+            ultimo_movimento = movimento;
+            char payload[2];
+            snprintf(payload, sizeof(payload), "%d", movimento);
+            esp_mqtt_client_publish(client, topico, payload, 0, 0, 0);
+            ESP_LOGI(TAG, "📤 Publicado %s → %s", topico, payload);
 
             if (movimento) {
-                ESP_LOGI(TAG, "Movimento detectado!");
-            } else if (luminosidade == 1 && !movimento) {
-                ESP_LOGW(TAG, "Sala vazia...");
-                gpio_set_level(RELAY_LIGHT_PIN, 0);
-            }
-
-            if (luminosidade) {
-                ESP_LOGI(TAG, "Ambiente claro.");
+                ESP_LOGI(TAG, "🚶 Movimento detectado!");
             } else {
-                ESP_LOGI(TAG, "Ambiente escuro.");
+                ESP_LOGI(TAG, "💤 Sem movimento.");
             }
         }
 

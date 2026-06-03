@@ -1,9 +1,13 @@
+import sys
 import os
 import time
 import paho.mqtt.client as mqtt
+
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CallbackQueryHandler
+from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 
@@ -69,7 +73,7 @@ async def checar_timeouts(context):
             
             keyboard = [
                 [
-                    InlineKeyboardButton("💡 Ligar", callback_data=f"ligar_{sala_id}"),
+                    InlineKeyboardButton("💡 Manter Ligado", callback_data=f"ligar_{sala_id}"),
                     InlineKeyboardButton("🛑 Desligar", callback_data=f"desligar_{sala_id}")
                 ]
             ]
@@ -92,12 +96,43 @@ async def button_callback(update, context):
     
     if acao == "desligar":
         mqtt_client.publish(f"sala/{sala_id}/comando", "OFF")
+        print(f"🛑 Gestor clicou em DESLIGAR — Sala {sala_id}")
         novo_texto = f"🛑 *Ação executada:* Cargas da Sala {sala_id} foram DESLIGADAS remotamente."
     else:
         mqtt_client.publish(f"sala/{sala_id}/comando", "ON")
-        novo_texto = f"💡 *Ação executada:* Cargas da Sala {sala_id} foram LIGADAS remotamente."
+        print(f"💡 Gestor clicou em MANTER LIGADO — Sala {sala_id}")
+        novo_texto = f"💡 *Ação executada:* Cargas da Sala {sala_id} foram MANTIDAS LIGADAS remotamente."
         
     await query.edit_message_text(text=novo_texto, parse_mode='Markdown')
+
+async def comando_manual(update, context):
+    if str(update.effective_chat.id) != CHAT_ID:
+        return
+
+    texto = update.message.text.lower().strip()
+    sala_id = "101"
+
+    if "desligar" in texto:
+        mqtt_client.publish(f"sala/{sala_id}/comando", "OFF")
+        print(f"🛑 Comando manual: Sala {sala_id} DESLIGADA via Telegram")
+        await update.message.reply_text(
+            f"🛑 *Luz da Sala {sala_id} DESLIGADA.*",
+            parse_mode='Markdown'
+        )
+    elif "ligar" in texto:
+        mqtt_client.publish(f"sala/{sala_id}/comando", "ON")
+        salas[sala_id]["ultimo_movimento"] = time.time()
+        salas[sala_id]["alerta_enviado"] = False
+        print(f"💡 Comando manual: Sala {sala_id} LIGADA via Telegram")
+        await update.message.reply_text(
+            f"💡 *Luz da Sala {sala_id} LIGADA.* Monitoramento retomado.",
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            "❓ Comando não reconhecido. Envie *ligar luz* ou *desligar luz*.",
+            parse_mode='Markdown'
+        )
 
 def iniciar_orquestrador():
     if not TOKEN or not CHAT_ID:
@@ -116,6 +151,7 @@ def iniciar_orquestrador():
     
     app.job_queue.run_repeating(checar_timeouts, interval=10, first=5)
     app.add_handler(CallbackQueryHandler(button_callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, comando_manual))
     
     print("🚀 Orquestrador IoT Iniciado! Monitorando as salas...")
     app.run_polling()
