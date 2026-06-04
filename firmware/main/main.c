@@ -11,13 +11,14 @@
 #include "esp_wifi.h"
 #include "mqtt_client.h"
 
-#define WIFI_SSID        "DW-FATIMA"
-#define WIFI_PASS        "simi4271"
-#define BROKER_URL       "mqtt://192.168.3.88"
+#define WIFI_SSID        "DW-ESCRITORIO"
+#define WIFI_PASS        "dwluiz342"
+#define BROKER_URL       "mqtt://192.168.0.8"
 #define SALA_ID          "101"
 
 #define PIR_SENSOR_PIN   2
 #define RELAY_LIGHT_PIN  4
+#define LDR_SENSOR_PIN   10
 
 #define WIFI_CONNECTED_BIT BIT0
 
@@ -103,7 +104,11 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
 }
 
 static void mqtt_app_start(void) {
-    esp_mqtt_client_config_t mqtt_cfg = { .broker.address.uri = BROKER_URL };
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.uri = BROKER_URL,
+        .credentials.username = "iot_user",
+        .credentials.authentication.password = "iot_pass123",
+    };
     client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(client);
@@ -120,6 +125,10 @@ void iniciar_gpios(void) {
     gpio_reset_pin(PIR_SENSOR_PIN);
     gpio_set_direction(PIR_SENSOR_PIN, GPIO_MODE_INPUT);
     gpio_set_pull_mode(PIR_SENSOR_PIN, GPIO_PULLDOWN_ONLY);
+
+    gpio_reset_pin(LDR_SENSOR_PIN);
+    gpio_set_direction(LDR_SENSOR_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(LDR_SENSOR_PIN, GPIO_PULLUP_ONLY);
 
     ESP_LOGI(TAG, "GPIOs inicializados.");
 }
@@ -139,8 +148,12 @@ void app_main(void) {
     mqtt_app_start();
 
     int ultimo_movimento = -1;
-    char topico[64];
-    snprintf(topico, sizeof(topico), "sala/%s/ocupacao", SALA_ID);
+    int ultimo_ldr = -1;
+
+    char topico_pir[64];
+    char topico_ldr[64];
+    snprintf(topico_pir, sizeof(topico_pir), "sala/%s/ocupacao", SALA_ID);
+    snprintf(topico_ldr, sizeof(topico_ldr), "sala/%s/luminosidade", SALA_ID);
 
     while (1) {
         int movimento = gpio_get_level(PIR_SENSOR_PIN);
@@ -149,14 +162,25 @@ void app_main(void) {
             ultimo_movimento = movimento;
             char payload[2];
             snprintf(payload, sizeof(payload), "%d", movimento);
-            esp_mqtt_client_publish(client, topico, payload, 0, 0, 0);
-            ESP_LOGI(TAG, "📤 Publicado %s → %s", topico, payload);
+            esp_mqtt_client_publish(client, topico_pir, payload, 0, 0, 0);
+            ESP_LOGI(TAG, "📤 Publicado %s → %s", topico_pir, payload);
 
             if (movimento) {
                 ESP_LOGI(TAG, "🚶 Movimento detectado!");
             } else {
                 ESP_LOGI(TAG, "💤 Sem movimento.");
             }
+        }
+
+        int ldr_raw = gpio_get_level(LDR_SENSOR_PIN);
+        int ldr = (ldr_raw == 0) ? 1 : 0;  // módulo LDR: LOW = aceso, HIGH = apagado
+
+        if (ldr != ultimo_ldr) {
+            ultimo_ldr = ldr;
+            char payload_ldr[2];
+            snprintf(payload_ldr, sizeof(payload_ldr), "%d", ldr);
+            esp_mqtt_client_publish(client, topico_ldr, payload_ldr, 0, 0, 0);
+            ESP_LOGI(TAG, "💡 Publicado %s → %s", topico_ldr, payload_ldr);
         }
 
         vTaskDelay(pdMS_TO_TICKS(500));
