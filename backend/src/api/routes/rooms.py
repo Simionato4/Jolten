@@ -33,3 +33,8 @@ async def get_room_history(sala_id: str, range_minutes: int = 60):
     if not historico:
         raise HTTPException(status_code=404, detail="Nenhum histórico encontrado")
     return historico
+
+
+@router.get("/rooms/{sala_id}/logs")
+async def get_room_logs(sala_id: str):
+    return await redis_service.get_logs(sala_id)

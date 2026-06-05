@@ -152,8 +152,10 @@ void app_main(void) {
 
     char topico_pir[64];
     char topico_ldr[64];
+    char topico_log[64];
     snprintf(topico_pir, sizeof(topico_pir), "sala/%s/ocupacao", SALA_ID);
     snprintf(topico_ldr, sizeof(topico_ldr), "sala/%s/luminosidade", SALA_ID);
+    snprintf(topico_log, sizeof(topico_log), "sala/%s/log", SALA_ID);
 
     while (1) {
         int movimento = gpio_get_level(PIR_SENSOR_PIN);
@@ -163,24 +165,32 @@ void app_main(void) {
             char payload[2];
             snprintf(payload, sizeof(payload), "%d", movimento);
             esp_mqtt_client_publish(client, topico_pir, payload, 0, 0, 0);
-            ESP_LOGI(TAG, "📤 Publicado %s → %s", topico_pir, payload);
 
             if (movimento) {
                 ESP_LOGI(TAG, "🚶 Movimento detectado!");
+                esp_mqtt_client_publish(client, topico_log, "Movimento detectado", 0, 0, 0);
             } else {
                 ESP_LOGI(TAG, "💤 Sem movimento.");
+                esp_mqtt_client_publish(client, topico_log, "Sem movimento", 0, 0, 0);
             }
         }
 
         int ldr_raw = gpio_get_level(LDR_SENSOR_PIN);
-        int ldr = (ldr_raw == 0) ? 1 : 0;  // módulo LDR: LOW = aceso, HIGH = apagado
+        int ldr = (ldr_raw == 0) ? 1 : 0;
 
         if (ldr != ultimo_ldr) {
             ultimo_ldr = ldr;
             char payload_ldr[2];
             snprintf(payload_ldr, sizeof(payload_ldr), "%d", ldr);
             esp_mqtt_client_publish(client, topico_ldr, payload_ldr, 0, 0, 0);
-            ESP_LOGI(TAG, "💡 Publicado %s → %s", topico_ldr, payload_ldr);
+
+            if (ldr) {
+                ESP_LOGI(TAG, "💡 Luz acesa");
+                esp_mqtt_client_publish(client, topico_log, "Luz acesa", 0, 0, 0);
+            } else {
+                ESP_LOGI(TAG, "🌑 Luz apagada");
+                esp_mqtt_client_publish(client, topico_log, "Luz apagada", 0, 0, 0);
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(500));

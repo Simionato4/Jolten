@@ -50,6 +50,20 @@ async def get_all_rooms() -> list[dict]:
     return [json.loads(v) for v in values if v]
 
 
+async def add_log(sala_id: str, mensagem: str) -> None:
+    r = get_redis()
+    agora = datetime.now(timezone.utc).isoformat()
+    entry = json.dumps({"timestamp": agora, "mensagem": mensagem})
+    await r.lpush(f"logs:{sala_id}", entry)
+    await r.ltrim(f"logs:{sala_id}", 0, 49)
+
+
+async def get_logs(sala_id: str) -> list[dict]:
+    r = get_redis()
+    entries = await r.lrange(f"logs:{sala_id}", 0, -1)
+    return [json.loads(e) for e in entries]
+
+
 async def close() -> None:
     global _redis
     if _redis:

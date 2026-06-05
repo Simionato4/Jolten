@@ -32,6 +32,7 @@ async def _handle_message(topic: str, payload: str) -> None:
             r = redis_service.get_redis()
             if await r.get(alerta_key):
                 await r.delete(alerta_key)
+                await log_event(sala_id, "✅ Alerta cancelado — movimento detectado")
                 from src.services import telegram_service
                 await telegram_service.send_movement_alert(sala_id)
 
@@ -58,6 +59,20 @@ async def _handle_message(topic: str, payload: str) -> None:
         await sse_queue.put({"sala_id": sala_id, "luminosidade": acesa, "tipo": "luminosidade"})
         print(f"[MQTT] sala/{sala_id}/luminosidade → {acesa}")
 
+    elif tipo == "log":
+        from datetime import datetime, timezone
+        timestamp = datetime.now(timezone.utc).isoformat()
+        await redis_service.add_log(sala_id, payload)
+        await sse_queue.put({"sala_id": sala_id, "mensagem": payload, "timestamp": timestamp, "tipo": "log"})
+        print(f"[LOG] sala/{sala_id} → {payload}")
+
+
+async def log_event(sala_id: str, mensagem: str) -> None:
+    from datetime import datetime, timezone
+    timestamp = datetime.now(timezone.utc).isoformat()
+    await redis_service.add_log(sala_id, mensagem)
+    await sse_queue.put({"sala_id": sala_id, "mensagem": mensagem, "timestamp": timestamp, "tipo": "log"})
+
 
 async def publish(topic: str, payload: str) -> None:
     async with aiomqtt.Client(
@@ -79,6 +94,7 @@ async def _run() -> None:
     ) as client:
         await client.subscribe("sala/+/ocupacao")
         await client.subscribe("sala/+/luminosidade")
+        await client.subscribe("sala/+/log")
         print("[MQTT] Inscrito em sala/+/ocupacao e sala/+/luminosidade")
 
         async for message in client.messages:

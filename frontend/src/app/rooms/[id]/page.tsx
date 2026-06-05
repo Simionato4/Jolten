@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { fetcher } from '@/lib/api'
 import { OccupancyChart } from '@/components/OccupancyChart'
 import { CommandButtons } from '@/components/CommandButtons'
+import { RoomLogs } from '@/components/RoomLogs'
 import type { RoomStatus, RoomHistory } from '@/types/room'
 
 interface Props {
@@ -69,6 +70,8 @@ export default function RoomDetail({ params }: Props) {
               <h2 className="text-base font-semibold text-gray-700 mb-4">Controle remoto</h2>
               <CommandButtons salaId={id} />
             </div>
+
+            <RoomLogs salaId={id} />
           </div>
         ) : (
           <p className="text-gray-400">Carregando...</p>

@@ -52,6 +52,7 @@ async def send_alert(sala_id: str, tempo_vazia: int) -> None:
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown",
     )
+    await mqtt_service.log_event(sala_id, f"⚠️ Alerta enviado — vazia há {_formatar_tempo(tempo_vazia)}")
 
 
 async def send_movement_alert(sala_id: str) -> None:
@@ -72,9 +73,11 @@ async def _button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if acao == "desligar":
         await mqtt_service.publish(f"sala/{sala_id}/comando", "OFF")
+        await mqtt_service.log_event(sala_id, "🛑 Luz desligada remotamente via Telegram")
         texto = f"🛑 Cargas da Sala {sala_id} *desligadas* remotamente."
     else:
         await mqtt_service.publish(f"sala/{sala_id}/comando", "ON")
+        await mqtt_service.log_event(sala_id, "💡 Luz ligada remotamente via Telegram")
         texto = f"💡 Sala {sala_id} mantida *ligada*. Monitoramento retomado."
 
     await query.edit_message_text(text=texto, parse_mode="Markdown")
@@ -107,9 +110,11 @@ async def _texto_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if "desligar" in texto:
         await mqtt_service.publish(f"sala/{sala_id}/comando", "OFF")
+        await mqtt_service.log_event(sala_id, "🛑 Luz desligada remotamente via Telegram")
         await update.message.reply_text(f"🛑 *Sala {sala_id} desligada.*", parse_mode="Markdown")
     elif "ligar" in texto:
         await mqtt_service.publish(f"sala/{sala_id}/comando", "ON")
+        await mqtt_service.log_event(sala_id, "💡 Luz ligada remotamente via Telegram")
         await update.message.reply_text(f"💡 *Sala {sala_id} ligada.*", parse_mode="Markdown")
     elif "estado" in texto:
         estado = await redis_service.get_room_state(sala_id)
@@ -120,6 +125,9 @@ async def _texto_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"📊 *Estado atual — Sala {sala_id}*\n\nLuz: {luz}\nOcupação: {ocupacao}",
                 parse_mode="Markdown",
             )
+            luz_txt = "ligada" if estado["luminosidade"] else "desligada"
+            ocup_txt = "ocupada" if estado["ocupada"] else "vazia"
+            await mqtt_service.log_event(sala_id, f"📊 Estado consultado — Luz {luz_txt}, sala {ocup_txt}")
         else:
             await update.message.reply_text(f"❓ Sala {sala_id} não encontrada.", parse_mode="Markdown")
     else:
