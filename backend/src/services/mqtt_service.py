@@ -27,6 +27,14 @@ async def _handle_message(topic: str, payload: str) -> None:
         luminosidade = estado_atual["luminosidade"] if estado_atual else True
         await redis_service.set_room_state(sala_id, ocupada=ocupada, luminosidade=luminosidade)
 
+        if ocupada:
+            alerta_key = f"alerta_enviado:{sala_id}"
+            r = redis_service.get_redis()
+            if await r.get(alerta_key):
+                await r.delete(alerta_key)
+                from src.services import telegram_service
+                await telegram_service.send_movement_alert(sala_id)
+
         await sse_queue.put({"sala_id": sala_id, "ocupada": ocupada, "tipo": "ocupacao"})
         print(f"[MQTT] sala/{sala_id}/ocupacao → {ocupada}")
 
@@ -41,9 +49,10 @@ async def _handle_message(topic: str, payload: str) -> None:
         era_acesa = estado_atual["luminosidade"] if estado_atual else False
 
         luz_acendeu = acesa and not era_acesa
+        luz_apagou = not acesa and era_acesa
         await redis_service.set_room_state(sala_id, ocupada=ocupada, luminosidade=acesa, reset_timer=luz_acendeu)
 
-        if luz_acendeu:
+        if luz_acendeu or luz_apagou:
             await redis_service.get_redis().delete(f"alerta_enviado:{sala_id}")
 
         await sse_queue.put({"sala_id": sala_id, "luminosidade": acesa, "tipo": "luminosidade"})

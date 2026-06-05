@@ -122,8 +122,8 @@ Backend detecta timeout
        │
        ▼
 Bot envia mensagem ao gestor:
-  "⚠️ Sala 101 está vazia há X segundos."
-  [ 💡 Ligar ]  [ 🛑 Desligar ]
+  "⚠️ Sala 101 está vazia e com luz acesa há X segundos."
+  [ 💡 Manter Ligado ]  [ 🛑 Desligar ]
        │
        ▼
 Gestor clica em um botão

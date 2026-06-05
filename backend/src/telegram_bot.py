@@ -28,7 +28,7 @@ async def simular_alerta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    mensagem = "⚠️ *Alerta:* A Sala 101 está vazia pelo tempo limite configurado. O que deseja fazer?"
+    mensagem = "⚠️ *Alerta:* A Sala 101 está vazia e com luz acesa pelo tempo limite configurado. O que deseja fazer?"
     
     await update.message.reply_text(mensagem, reply_markup=reply_markup, parse_mode='Markdown')
 

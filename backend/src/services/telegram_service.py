@@ -23,6 +23,20 @@ def _build_app() -> Application:
     )
 
 
+def _formatar_tempo(segundos: int) -> str:
+    horas = segundos // 3600
+    minutos = (segundos % 3600) // 60
+    segs = segundos % 60
+    partes = []
+    if horas:
+        partes.append(f"{horas} {'hora' if horas == 1 else 'horas'}")
+    if minutos:
+        partes.append(f"{minutos} {'minuto' if minutos == 1 else 'minutos'}")
+    if segs or not partes:
+        partes.append(f"{segs} {'segundo' if segs == 1 else 'segundos'}")
+    return " e ".join(partes) if len(partes) <= 2 else ", ".join(partes[:-1]) + " e " + partes[-1]
+
+
 async def send_alert(sala_id: str, tempo_vazia: int) -> None:
     if _app is None:
         return
@@ -34,16 +48,20 @@ async def send_alert(sala_id: str, tempo_vazia: int) -> None:
     ]
     await _app.bot.send_message(
         chat_id=settings.gestor_chat_id,
-        text=f"⚠️ *Sala {sala_id}* está vazia há *{tempo_vazia}s*. O que deseja fazer?",
+        text=f"⚠️ *Sala {sala_id}* está vazia e com luz acesa há *{_formatar_tempo(tempo_vazia)}*. O que deseja fazer?",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown",
     )
 
 
-async def _set_luminosidade(sala_id: str, acesa: bool) -> None:
-    estado = await redis_service.get_room_state(sala_id)
-    if estado:
-        await redis_service.set_room_state(sala_id, ocupada=estado["ocupada"], luminosidade=acesa)
+async def send_movement_alert(sala_id: str) -> None:
+    if _app is None:
+        return
+    await _app.bot.send_message(
+        chat_id=settings.gestor_chat_id,
+        text=f"✅ *Sala {sala_id}*: movimento detectado! Alerta cancelado automaticamente.",
+        parse_mode="Markdown",
+    )
 
 
 async def _button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -54,12 +72,9 @@ async def _button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if acao == "desligar":
         await mqtt_service.publish(f"sala/{sala_id}/comando", "OFF")
-        await _set_luminosidade(sala_id, False)
         texto = f"🛑 Cargas da Sala {sala_id} *desligadas* remotamente."
     else:
         await mqtt_service.publish(f"sala/{sala_id}/comando", "ON")
-        await _set_luminosidade(sala_id, True)
-        await redis_service.get_redis().delete(f"alerta_enviado:{sala_id}")
         texto = f"💡 Sala {sala_id} mantida *ligada*. Monitoramento retomado."
 
     await query.edit_message_text(text=texto, parse_mode="Markdown")
@@ -92,16 +107,24 @@ async def _texto_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if "desligar" in texto:
         await mqtt_service.publish(f"sala/{sala_id}/comando", "OFF")
-        await _set_luminosidade(sala_id, False)
         await update.message.reply_text(f"🛑 *Sala {sala_id} desligada.*", parse_mode="Markdown")
     elif "ligar" in texto:
         await mqtt_service.publish(f"sala/{sala_id}/comando", "ON")
-        await _set_luminosidade(sala_id, True)
-        await redis_service.get_redis().delete(f"alerta_enviado:{sala_id}")
         await update.message.reply_text(f"💡 *Sala {sala_id} ligada.*", parse_mode="Markdown")
+    elif "estado" in texto:
+        estado = await redis_service.get_room_state(sala_id)
+        if estado:
+            luz = "💡 *Ligada*" if estado["luminosidade"] else "🌑 *Desligada*"
+            ocupacao = "🚶 *Ocupada*" if estado["ocupada"] else "💤 *Vazia*"
+            await update.message.reply_text(
+                f"📊 *Estado atual — Sala {sala_id}*\n\nLuz: {luz}\nOcupação: {ocupacao}",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(f"❓ Sala {sala_id} não encontrada.", parse_mode="Markdown")
     else:
         await update.message.reply_text(
-            "❓ Comando não reconhecido. Envie *ligar* ou *desligar*.",
+            "❓ Comando não reconhecido. Envie *ligar*, *desligar* ou *estado*.",
             parse_mode="Markdown",
         )
 
