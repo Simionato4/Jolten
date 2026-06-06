@@ -25,7 +25,7 @@ export function OccupancyChart({ data }: Props) {
 
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <AreaChart data={formatted} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+      <AreaChart data={formatted} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="gradMovimento" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
@@ -33,9 +33,15 @@ export function OccupancyChart({ data }: Props) {
           </linearGradient>
         </defs>
         <XAxis dataKey="hora" tick={{ fontSize: 11 }} />
-        <YAxis domain={[0, 1]} ticks={[0, 1]} tick={{ fontSize: 11 }} />
+        <YAxis
+          domain={[0, 1]}
+          ticks={[0, 1]}
+          tick={{ fontSize: 11 }}
+          tickFormatter={(v) => (v === 1 ? 'Ocupado' : 'Vazio')}
+          width={56}
+        />
         <Tooltip
-          formatter={(v: number) => [v === 1 ? 'Ocupada' : 'Vazia', 'Estado']}
+          formatter={(v: unknown) => [v === 1 ? 'Ocupada' : 'Vazia', 'Estado']}
         />
         <Area
           type="stepAfter"

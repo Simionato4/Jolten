@@ -24,6 +24,9 @@ async def get_room(sala_id: str):
     agora = datetime.now(timezone.utc)
     ultimo = datetime.fromisoformat(sala["ultimo_movimento"])
     sala["tempo_vazia"] = int((agora - ultimo).total_seconds())
+    info = await redis_service.get_room_info(sala_id)
+    if info:
+        sala.update(info)
     return sala
 
 

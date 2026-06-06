@@ -8,9 +8,7 @@ interface Props {
 }
 
 export function RoomCard({ room }: Props) {
-  const statusColor = room.ocupada
-    ? 'bg-green-500'
-    : 'bg-gray-400'
+  const statusColor = 'bg-green-500'
 
   const minutos = Math.floor(room.tempo_vazia / 60)
   const segundos = room.tempo_vazia % 60

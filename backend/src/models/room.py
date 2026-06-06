@@ -8,6 +8,9 @@ class RoomStatus(BaseModel):
     luminosidade: bool
     ultimo_movimento: datetime
     tempo_vazia: int  # segundos desde o último movimento
+    uptime: int | None = None   # segundos desde o boot do ESP32
+    rssi: int | None = None     # sinal Wi-Fi em dBm
+    ip: str | None = None       # IP do ESP32 na rede
 
 
 class RoomHistory(BaseModel):

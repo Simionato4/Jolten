@@ -1,4 +1,5 @@
 import asyncio
+import json
 import aiomqtt
 
 from src.config import settings
@@ -32,7 +33,7 @@ async def _handle_message(topic: str, payload: str) -> None:
             r = redis_service.get_redis()
             if await r.get(alerta_key):
                 await r.delete(alerta_key)
-                await log_event(sala_id, "✅ Alerta cancelado — movimento detectado")
+                await log_event(sala_id, "✅ Alerta cancelado — movimento detectado", tipo="alerta")
                 from src.services import telegram_service
                 await telegram_service.send_movement_alert(sala_id)
 
@@ -59,19 +60,39 @@ async def _handle_message(topic: str, payload: str) -> None:
         await sse_queue.put({"sala_id": sala_id, "luminosidade": acesa, "tipo": "luminosidade"})
         print(f"[MQTT] sala/{sala_id}/luminosidade → {acesa}")
 
+    elif tipo == "info":
+        try:
+            info = json.loads(payload)
+            await redis_service.set_room_info(
+                sala_id,
+                uptime=int(info.get("uptime", 0)),
+                rssi=int(info.get("rssi", 0)),
+                ip=str(info.get("ip", "")),
+            )
+            print(f"[INFO] sala/{sala_id} → uptime={info.get('uptime')}s rssi={info.get('rssi')}dBm ip={info.get('ip')}")
+        except (json.JSONDecodeError, KeyError):
+            pass
+
     elif tipo == "log":
         from datetime import datetime, timezone
+        p = payload.lower()
+        if "movimento" in p:
+            log_tipo = "movimento"
+        elif "luz" in p:
+            log_tipo = "luminosidade"
+        else:
+            log_tipo = "sistema"
         timestamp = datetime.now(timezone.utc).isoformat()
-        await redis_service.add_log(sala_id, payload)
-        await sse_queue.put({"sala_id": sala_id, "mensagem": payload, "timestamp": timestamp, "tipo": "log"})
+        await redis_service.add_log(sala_id, payload, log_tipo)
+        await sse_queue.put({"sala_id": sala_id, "mensagem": payload, "timestamp": timestamp, "tipo": "log", "log_tipo": log_tipo})
         print(f"[LOG] sala/{sala_id} → {payload}")
 
 
-async def log_event(sala_id: str, mensagem: str) -> None:
+async def log_event(sala_id: str, mensagem: str, tipo: str = "sistema") -> None:
     from datetime import datetime, timezone
     timestamp = datetime.now(timezone.utc).isoformat()
-    await redis_service.add_log(sala_id, mensagem)
-    await sse_queue.put({"sala_id": sala_id, "mensagem": mensagem, "timestamp": timestamp, "tipo": "log"})
+    await redis_service.add_log(sala_id, mensagem, tipo)
+    await sse_queue.put({"sala_id": sala_id, "mensagem": mensagem, "timestamp": timestamp, "tipo": "log", "log_tipo": tipo})
 
 
 async def publish(topic: str, payload: str) -> None:
@@ -95,12 +116,16 @@ async def _run() -> None:
         await client.subscribe("sala/+/ocupacao")
         await client.subscribe("sala/+/luminosidade")
         await client.subscribe("sala/+/log")
-        print("[MQTT] Inscrito em sala/+/ocupacao e sala/+/luminosidade")
+        await client.subscribe("sala/+/info")
+        print("[MQTT] Inscrito em sala/+/ocupacao, sala/+/luminosidade, sala/+/log, sala/+/info")
 
         async for message in client.messages:
             topic = str(message.topic)
             payload = message.payload.decode()
-            await _handle_message(topic, payload)
+            try:
+                await _handle_message(topic, payload)
+            except Exception as e:
+                print(f"[MQTT] Erro ao processar {topic}: {e}")
 
 
 async def start() -> None:
