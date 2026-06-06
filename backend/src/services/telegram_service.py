@@ -116,7 +116,7 @@ async def _texto_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await mqtt_service.publish(f"sala/{sala_id}/comando", "ON")
         await mqtt_service.log_event(sala_id, "💡 Luz ligada remotamente via Telegram", tipo="remoto")
         await update.message.reply_text(f"💡 *Sala {sala_id} ligada.*", parse_mode="Markdown")
-    elif "estado" in texto:
+    elif "status" in texto:
         estado = await redis_service.get_room_state(sala_id)
         if estado:
             luz = "💡 *Ligada*" if estado["luminosidade"] else "🌑 *Desligada*"
@@ -132,7 +132,7 @@ async def _texto_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text(f"❓ Sala {sala_id} não encontrada.", parse_mode="Markdown")
     else:
         await update.message.reply_text(
-            "❓ Comando não reconhecido. Envie *ligar*, *desligar* ou *estado*.",
+            "❓ Comando não reconhecido. Envie *ligar*, *desligar* ou *status*.",
             parse_mode="Markdown",
         )
 
