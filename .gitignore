@@ -9,6 +9,7 @@ infrastructure/.env
 # ==========================================
 # 2. Firmware
 # ==========================================
+firmware/main/credentials.h
 firmware/build/
 firmware/sdkconfig
 firmware/sdkconfig.old

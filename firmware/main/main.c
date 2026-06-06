@@ -11,10 +11,8 @@
 #include "esp_wifi.h"
 #include "esp_timer.h"
 #include "mqtt_client.h"
+#include "credentials.h"
 
-#define WIFI_SSID        "DW-ESCRITORIO"
-#define WIFI_PASS        "dwluiz342"
-#define BROKER_URL       "mqtt://tramway.proxy.rlwy.net:11613"
 #define SALA_ID          "101"
 
 #define PIR_SENSOR_PIN   2
@@ -108,8 +106,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
 static void mqtt_app_start(void) {
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = BROKER_URL,
-        .credentials.username = "iot_user",
-        .credentials.authentication.password = "iot_pass123",
+        .credentials.username = MQTT_USER,
+        .credentials.authentication.password = MQTT_PASS,
     };
     client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
