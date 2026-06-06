@@ -1,220 +1,281 @@
-# 🏫 Sistema IoT de Automação - Jolteon
+# Jolteon IoT — Monitoramento de Salas em Tempo Real
 
-Sistema embarcado de monitoramento e controle de salas, desenvolvido para reduzir o desperdício de energia elétrica detectando ocupação em tempo real e notificando gestores via Telegram.
+Sistema de automação e eficiência energética para ambientes corporativos. Monitora ocupação e iluminação de salas via sensores conectados a um ESP32, exibe o estado em tempo real num dashboard web e envia alertas via Telegram quando uma sala fica vazia com a luz acesa.
 
 ---
 
-## 📐 Arquitetura Geral
+## Arquitetura
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                        HARDWARE (Edge)                   │
-│                                                          │
-│   [Sensor PIR] ──┐                                       │
-│   [Sensor LDR] ──┤──► ESP32 (Firmware C / ESP-IDF) ──────┼──► Wi-Fi
-│   [Relé]    ◄────┘                                       │
-└──────────────────────────────────────────────────────────┘
-                              │ MQTT (TCP/IP)
-                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    INFRAESTRUTURA (Docker)                  │
+│                         HARDWARE                            │
 │                                                             │
-│   ┌─────────────┐     ┌─────────────┐    ┌──────────────┐   │
-│   │  Mosquitto  │     │  InfluxDB   │    │   Grafana    │   │
-│   │ Broker MQTT │     │  (TSDB v2)  │    │  (Dashboard) │   │
-│   │  :1883      │     │   :8086     │    │    :3000     │   │
-│   └──────┬──────┘     └──────▲──────┘    └──────▲───────┘   │
-└──────────┼────────────────────┼─────────────────┼───────────┘
-           │ subscribe          │ write           │ query
-           ▼                    │                 │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │                  ESP32 (Sala 101)                   │    │
+│  │                                                     │    │
+│  │   GPIO 2  ← Sensor PIR   (movimento)                │    │
+│  │   GPIO 10 ← Sensor LDR   (luminosidade)             │    │
+│  │   GPIO 4  → Relé         (iluminação)               │    │
+│  └────────────────────────┬────────────────────────────┘    │
+└───────────────────────────┼─────────────────────────────────┘
+                            │ MQTT sobre TCP/IP (Wi-Fi)
+                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    BACKEND (Python)                         │
+│                    RAILWAY (Cloud)                          │
 │                                                             │
-│              main.py — Orquestrador IoT                     │
-│         (MQTT Client + Bot Telegram + Job Queue)            │
-└────────────────────────────┬────────────────────────────────┘
-                             │ HTTPS (Bot API)
-                             ▼
-                    ┌─────────────────┐
-                    │  Bot Telegram   │
-                    │  (Alertas +     │
-                    │   Controle)     │
-                    └─────────────────┘
+│  ┌─────────────┐  MQTT  ┌──────────────────────────────┐   │
+│  │  Mosquitto  │◄──────►│     Backend — FastAPI         │   │
+│  │ MQTT Broker │        │                              │   │
+│  └─────────────┘        │  mqtt_service   (subscreve)  │   │
+│                         │  redis_service  (estado)     │   │
+│  ┌─────────────┐        │  influx_service (histórico)  │   │
+│  │    Redis    │◄──────►│  telegram_service (alertas)  │   │
+│  │   (Estado)  │        │  SSE /events    (push→front) │   │
+│  └─────────────┘        └──────────────┬───────────────┘   │
+│                                        │                   │
+│  ┌─────────────┐                       │                   │
+│  │  InfluxDB   │◄──────────────────────┘                   │
+│  │ (Histórico) │                                           │
+│  └─────────────┘                                           │
+└────────────────────────────────────────────────────────────┘
+                            │ SSE (HTTP/HTTPS)
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│              VERCEL — Frontend (Next.js)                    │
+│                   jolten.vercel.app                         │
+└─────────────────────────────────────────────────────────────┘
+                            │ Telegram Bot API
+                            ▼
+                    ┌───────────────┐
+                    │    Telegram   │
+                    │ (Bot do Gestor│
+                    └───────────────┘
 ```
+
+### Fluxo de dados
+
+1. O **ESP32** lê os sensores a cada 500ms e publica no broker MQTT:
+   - `sala/101/ocupacao` — `1` (movimento detectado) ou `0` (sem movimento)
+   - `sala/101/luminosidade` — `1` (luz acesa) ou `0` (apagada)
+   - `sala/101/log` — mensagens textuais de eventos
+   - `sala/101/info` — JSON com `uptime`, `rssi` e `ip` (a cada 30s)
+   - Também assina `sala/101/comando` para receber `ON`/`OFF` e acionar o relé
+
+2. O **Backend** (FastAPI no Railway) está inscrito em todos esses tópicos via `aiomqtt`. A cada mensagem:
+   - Persiste o estado atual no **Redis** (chave `sala:{id}`)
+   - Grava a série histórica no **InfluxDB**
+   - Faz broadcast do evento para todos os clientes SSE ativos
+
+3. O **Frontend** (Next.js no Vercel) mantém uma conexão SSE aberta em `/events`. Ao conectar recebe o snapshot completo de todas as salas; em seguida recebe eventos incrementais em tempo real sem polling.
+
+4. O **Telegram Bot** (embutido no backend) verifica a cada 10 segundos se alguma sala está vazia com luz acesa além do tempo configurado (`TIMEOUT_SALA`). Se sim, envia alerta com botões de ação. O gestor pode responder pelo Telegram ou pelo dashboard.
 
 ---
 
-## 🧩 Componentes do Sistema
+## Componentes
 
-### 1. 📟 Firmware — ESP32 (`/firmware`)
+### Firmware — ESP32 (`/firmware`)
 
-Desenvolvido em **C com ESP-IDF**, roda diretamente no microcontrolador.
+Desenvolvido em **C com ESP-IDF**.
 
-**Responsabilidades:**
-- Lê o **sensor PIR (HC-SR501)** para detectar movimento (`GPIO 2`)
-- Lê o **sensor LDR** para medir luminosidade (`GPIO 3`)
-- Controla o **relé de iluminação** (`GPIO 4`)
-- Conecta à rede Wi-Fi e publica dados no broker MQTT via TCP/IP
+| Arquivo | Descrição |
+|---|---|
+| `main/main.c` | Lógica principal: Wi-Fi, MQTT, leitura de GPIO, publicação e controle do relé |
+| `main/credentials.h` | Credenciais locais — **gitignored** (ver `credentials.h.example`) |
+| `main/credentials.h.example` | Template de credenciais para configuração |
 
-**Tópicos MQTT publicados:**
-| Tópico | Payload | Descrição |
+**Pinos:**
+
+| GPIO | Componente | Direção |
 |---|---|---|
-| `sala/{id}/ocupacao` | `1` ou `0` | Estado do sensor de movimento |
-| `sala/{id}/luminosidade` | `1` ou `0` | Estado do sensor de luz |
-
-**Tópicos MQTT assinados:**
-| Tópico | Payload | Descrição |
-|---|---|---|
-| `sala/{id}/comando` | `ON` / `OFF` | Controle remoto do relé |
+| 2 | Sensor PIR — detecção de movimento | Entrada |
+| 4 | Relé — controle da iluminação | Saída |
+| 10 | Sensor LDR — detecção de luz | Entrada |
 
 ---
 
-### 2. 🐳 Infraestrutura — Docker (`/infrastructure`)
-
-Toda a infraestrutura de servidores roda em **contêineres Docker** via `docker-compose.yml`.
-
-#### 🦟 Mosquitto (Broker MQTT)
-- **Imagem:** `eclipse-mosquitto:2`
-- **Porta:** `1883`
-- **Função:** Recebe as mensagens publicadas pelo ESP32 e as distribui para os assinantes (backend Python).
-- **Configuração:** Modo anônimo habilitado (`allow_anonymous true`) — recomenda-se autenticação em produção.
-
-#### 📦 InfluxDB v2 (Banco de Dados Time-Series)
-- **Imagem:** `influxdb:2`
-- **Porta:** `8086`
-- **Função:** Armazena o histórico de todas as leituras dos sensores (movimento, luminosidade) com timestamps precisos.
-- **Organização:** `unimater` | **Bucket:** `energia_salas`
-
-#### 📊 Grafana (Dashboard)
-- **Imagem:** `grafana/grafana:latest`
-- **Porta:** `3000`
-- **Função:** Visualização gráfica dos dados históricos consultados no InfluxDB. Permite criar dashboards de consumo e ocupação por sala.
-- **Acesso padrão:** `admin` / `admin` *(alterar em produção)*
-
----
-
-### 3. 🐍 Backend — Python (`/backend`)
-
-Coração lógico do sistema. Roda como processo Python e integra todos os serviços.
-
-**Arquivo principal:** `backend/src/main.py`
-
-**Responsabilidades:**
-- Conecta ao broker Mosquitto e **assina** o tópico `sala/+/ocupacao`
-- A cada mensagem recebida, **salva o dado** no InfluxDB
-- Executa um **job periódico** (a cada **X** segundos) verificando se alguma sala ultrapassou o tempo limite sem movimento (`TIMEOUT_TESTE = 30s`)
-- Ao detectar sala vazia por tempo excessivo, **envia alerta via Telegram** com botões de ação
-- Ao receber um clique nos botões, **publica comando MQTT** (`ON`/`OFF`) de volta para o ESP32
-
----
-
-### 4. 🤖 Bot Telegram
-
-O bot é o canal de comunicação entre o sistema e o gestor do prédio.
-
-**Fluxo de um alerta:**
+### Backend — FastAPI (`/backend`)
 
 ```
-Sala vazia por > 30s
-       │
-       ▼
-Backend detecta timeout
-       │
-       ▼
-Bot envia mensagem ao gestor:
-  "⚠️ Sala 101 está vazia e com luz acesa há X segundos."
-  [ 💡 Manter Ligado ]  [ 🛑 Desligar ]
-       │
-       ▼
-Gestor clica em um botão
-       │
-       ▼
-Backend publica MQTT: sala/101/comando → "OFF"
-       │
-       ▼
-ESP32 recebe e aciona o relé
+src/
+├── main.py                    # App FastAPI, lifespan, CORS, registro das rotas
+├── config.py                  # Variáveis de ambiente via pydantic-settings
+├── api/
+│   ├── dependencies.py        # Autenticação por API Key (X-API-Key)
+│   └── routes/
+│       ├── events.py          # GET /events — SSE com pub/sub por subscriber
+│       ├── rooms.py           # GET /rooms e detalhes de cada sala
+│       └── commands.py        # POST /rooms/{id}/command — controle remoto
+└── services/
+    ├── mqtt_service.py        # Conexão MQTT com retry exponencial, broadcast SSE
+    ├── redis_service.py       # Estado atual, logs e info do dispositivo
+    ├── influx_service.py      # Escrita e consulta de séries históricas
+    └── telegram_service.py    # Bot, alertas automáticos, comandos via texto
 ```
 
-**Configuração necessária:**
-1. Criar um bot no [@BotFather](https://t.me/BotFather) e obter o `TELEGRAM_TOKEN`
-2. Iniciar o bot e usar o comando `/start` para obter o `GESTOR_CHAT_ID`
-3. Preencher o arquivo `.env` com essas credenciais
+**Endpoints:**
+
+| Método | Rota | Auth | Descrição |
+|---|---|---|---|
+| `GET` | `/events` | — | Stream SSE com eventos em tempo real |
+| `GET` | `/rooms` | — | Lista todas as salas com estado atual |
+| `GET` | `/rooms/{id}` | — | Estado detalhado + info do dispositivo (uptime, rssi, ip) |
+| `GET` | `/rooms/{id}/history?range_minutes=60` | — | Histórico de ocupação via InfluxDB |
+| `GET` | `/rooms/{id}/logs` | — | Últimas 50 entradas de log da sala |
+| `POST` | `/rooms/{id}/command` | X-API-Key | Envia `ON` ou `OFF` via MQTT para o relé |
+| `GET` | `/health` | — | Health check |
 
 ---
 
-## ⚙️ Configuração e Execução
+### Frontend — Next.js (`/frontend`)
 
-### Pré-requisitos
-- Docker e Docker Compose instalados
-- Python 3.10+
-- ESP-IDF configurado (para compilar o firmware)
+Deploy em: **https://jolten.vercel.app**
 
-### 1. Subir a infraestrutura
+```
+src/
+├── app/
+│   ├── page.tsx              # Dashboard — grid de salas em tempo real
+│   └── rooms/[id]/page.tsx   # Detalhe da sala — métricas, gráfico, controle, logs
+├── components/
+│   ├── RoomCard.tsx          # Card de sala no dashboard
+│   ├── CommandButtons.tsx    # Botões Ligar / Desligar
+│   ├── OccupancyChart.tsx    # Gráfico histórico de ocupação
+│   └── RoomLogs.tsx          # Feed de logs em tempo real
+└── lib/
+    ├── api.ts                # Funções de fetch e sendCommand
+    └── hooks/useRealtime.ts  # Hook SSE com reconexão automática
+```
+
+**Páginas:**
+- `/` — Dashboard com cards de todas as salas e indicador de conexão SSE
+- `/rooms/[id]` — Detalhe com métricas (ocupação, iluminação, último movimento, tempo vazia), gráfico histórico, controle remoto e aba de logs
+
+---
+
+### Telegram Bot
+
+O bot roda dentro do backend e responde apenas ao `GESTOR_CHAT_ID` configurado.
+
+**Comandos por texto:**
+
+| Mensagem | Ação |
+|---|---|
+| `ligar` | Liga a iluminação da Sala 101 via MQTT |
+| `desligar` | Desliga a iluminação da Sala 101 via MQTT |
+| `status` | Retorna o estado atual de ocupação e iluminação |
+
+**Alerta automático:**
+
+```
+Sala vazia + luz acesa por mais de TIMEOUT_SALA segundos
+                        │
+                        ▼
+      Bot envia mensagem ao gestor com botões inline:
+      [ 💡 Manter Ligado ]  [ 🛑 Desligar ]
+                        │
+                        ▼
+      Gestor responde → Backend publica MQTT → ESP32 aciona o relé
+```
+
+---
+
+### Infraestrutura local — Docker Compose (`/infrastructure`)
+
+Para desenvolvimento local sem Railway:
 
 ```bash
 cd infrastructure
+cp .env.example .env     # preencha as credenciais
 docker compose up -d
 ```
 
-### 2. Configurar variáveis de ambiente
+Serviços disponíveis:
 
-Crie o arquivo `backend/.env`:
+| Serviço | Porta | Descrição |
+|---|---|---|
+| Mosquitto | 1883 | Broker MQTT |
+| InfluxDB | 8086 | Banco de dados de séries temporais |
+| Redis | 6379 | Estado em memória |
+| Backend | 8000 | API FastAPI |
 
-```env
-TELEGRAM_TOKEN=seu_token_aqui
-GESTOR_CHAT_ID=seu_chat_id_aqui
+---
 
-INFLUX_URL=http://localhost:8086
-INFLUX_TOKEN=seu_token_influx
-INFLUX_ORG=unimater
-INFLUX_BUCKET=energia_salas
-```
+## Deploy em produção
 
-### 3. Instalar dependências e rodar o backend
+| Componente | Plataforma | Serviço |
+|---|---|---|
+| Backend (FastAPI) | Railway | `amiable-upliftment` — Root dir: `/backend` |
+| Broker MQTT (Mosquitto) | Railway | `Jolten` — Root dir: `/infrastructure/mosquitto` |
+| Redis | Railway | Gerenciado |
+| InfluxDB | Railway | Gerenciado |
+| Frontend (Next.js) | Vercel | `jolten.vercel.app` — Root dir: `/frontend` |
+
+### Variáveis de ambiente — Backend (Railway)
+
+| Variável | Descrição |
+|---|---|
+| `MQTT_BROKER` | Host do Mosquitto |
+| `MQTT_PORT` | Porta do broker |
+| `MQTT_USER` | Usuário MQTT |
+| `MQTT_PASS` | Senha MQTT |
+| `REDIS_URL` | URL de conexão do Redis |
+| `INFLUX_URL` | URL do InfluxDB |
+| `INFLUX_TOKEN` | Token de acesso |
+| `INFLUX_ORG` | Organização |
+| `INFLUX_BUCKET` | Bucket de dados |
+| `TELEGRAM_TOKEN` | Token obtido no BotFather |
+| `GESTOR_CHAT_ID` | Chat ID do gestor (use `/start` no bot para descobrir) |
+| `API_KEY` | Chave para autenticar comandos remotos |
+| `CORS_ORIGINS` | JSON array com origens permitidas — ex: `["https://jolten.vercel.app"]` |
+| `TIMEOUT_SALA` | Segundos sem movimento para disparar alerta (padrão: `30`) |
+
+### Variáveis de ambiente — Frontend (Vercel)
+
+| Variável | Descrição |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | URL pública do backend no Railway |
+| `NEXT_PUBLIC_API_KEY` | Mesma chave definida em `API_KEY` no backend |
+
+---
+
+## Desenvolvimento local
+
+### Backend
 
 ```bash
 cd backend
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+source .venv/bin/activate     # Linux/macOS
 pip install -r requirements.txt
-python src/main.py
+# configure backend/.env com as variáveis necessárias
+python run.py
 ```
 
-### 4. Compilar e gravar o firmware
+### Frontend
 
-Edite `firmware/main/main.c` com as credenciais da rede Wi-Fi e o IP do broker, depois:
+```bash
+cd frontend
+npm install
+# configure frontend/.env.local com NEXT_PUBLIC_API_URL=http://localhost:8000
+npm run dev
+```
+
+### Firmware
 
 ```bash
 cd firmware
+cp main/credentials.h.example main/credentials.h
+# edite credentials.h com SSID, senha Wi-Fi e credenciais MQTT
 idf.py build flash monitor
 ```
 
 ---
 
-## 📁 Estrutura do Repositório
+## Segurança
 
-```
-.
-├── backend/
-│   ├── src/
-│   │   ├── main.py           # Orquestrador principal (MQTT + Telegram + InfluxDB)
-│   │   ├── mqtt_client.py    # Cliente MQTT standalone (utilitário)
-│   │   └── telegram_bot.py   # Bot Telegram standalone (utilitário)
-│   └── requirements.txt
-├── firmware/
-│   └── main/
-│       └── main.c            # Firmware ESP32 (ESP-IDF)
-├── infrastructure/
-│   ├── config/
-│   │   └── mosquitto.conf    # Configuração do broker
-│   └── docker-compose.yml    # Stack completa de serviços
-└── README.md
-```
-
----
-
-## 🔮 Próximos Passos
-
-- [ ] Implementar autenticação no broker Mosquitto (usuário/senha)
-- [ ] Configurar dashboards de consumo no Grafana
-- [ ] Tornar o `TIMEOUT` configurável por sala via Telegram
-- [ ] Adicionar suporte a múltiplas salas de forma dinâmica
-- [ ] Criar Dockerfile para o backend Python
+- Credenciais do firmware ficam em `firmware/main/credentials.h` — **gitignored**
+- Credenciais da infra local ficam em `infrastructure/.env` — **gitignored**
+- Todas as variáveis sensíveis do backend são injetadas via Railway — nunca commitadas
+- O endpoint de comando requer header `X-API-Key`
+- O bot Telegram só responde ao `GESTOR_CHAT_ID` configurado
