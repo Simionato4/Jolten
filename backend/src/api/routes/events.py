@@ -3,30 +3,37 @@ import json
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from src.services.mqtt_service import sse_queue
+from src.services import mqtt_service
 
 router = APIRouter(tags=["events"])
 
 
 async def _stream():
-    # Ressincronização ao conectar/reconectar (IMPORT-004)
     from src.services import redis_service
     from datetime import datetime, timezone
 
-    salas = await redis_service.get_all_rooms()
-    agora = datetime.now(timezone.utc)
-    for sala in salas:
-        ultimo = datetime.fromisoformat(sala["ultimo_movimento"])
-        sala["tempo_vazia"] = int((agora - ultimo).total_seconds())
-
-    yield f"data: {json.dumps({'tipo': 'sync', 'salas': salas})}\n\n"
-
-    while True:
+    queue = mqtt_service.subscribe()
+    try:
         try:
-            evento = await asyncio.wait_for(sse_queue.get(), timeout=30)
-            yield f"data: {json.dumps(evento)}\n\n"
-        except asyncio.TimeoutError:
-            yield ": keep-alive\n\n"
+            salas = await redis_service.get_all_rooms()
+            agora = datetime.now(timezone.utc)
+            for sala in salas:
+                ultimo = datetime.fromisoformat(sala["ultimo_movimento"])
+                sala["tempo_vazia"] = int((agora - ultimo).total_seconds())
+        except Exception as e:
+            print(f"[SSE] Erro ao buscar estado inicial do Redis: {e}")
+            salas = []
+
+        yield f"data: {json.dumps({'tipo': 'sync', 'salas': salas})}\n\n"
+
+        while True:
+            try:
+                evento = await asyncio.wait_for(queue.get(), timeout=30)
+                yield f"data: {json.dumps(evento)}\n\n"
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+    finally:
+        mqtt_service.unsubscribe(queue)
 
 
 @router.get("/events")
