@@ -14,7 +14,7 @@
 
 #define WIFI_SSID        "DW-ESCRITORIO"
 #define WIFI_PASS        "dwluiz342"
-#define BROKER_URL       "mqtt://192.168.0.15"
+#define BROKER_URL       "mqtt://tramway.proxy.rlwy.net:11613"
 #define SALA_ID          "101"
 
 #define PIR_SENSOR_PIN   2
