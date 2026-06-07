@@ -86,12 +86,13 @@ async def _button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def _check_timeouts(context: ContextTypes.DEFAULT_TYPE) -> None:
     salas = await redis_service.get_all_rooms()
     agora = datetime.now(timezone.utc)
+    timeout = await redis_service.get_timeout() or settings.timeout_sala
 
     for sala in salas:
         ultimo = datetime.fromisoformat(sala["ultimo_movimento"])
         tempo_vazia = int((agora - ultimo).total_seconds())
 
-        if not sala["ocupada"] and sala["luminosidade"] and tempo_vazia > settings.timeout_sala:
+        if not sala["ocupada"] and sala["luminosidade"] and tempo_vazia > timeout:
             alerta_key = f"alerta_enviado:{sala['sala_id']}"
             r = redis_service.get_redis()
             ja_enviado = await r.get(alerta_key)
@@ -99,6 +100,20 @@ async def _check_timeouts(context: ContextTypes.DEFAULT_TYPE) -> None:
                 await send_alert(sala["sala_id"], tempo_vazia)
                 await r.set(alerta_key, "1", ex=settings.timeout_sala * 2)
                 print(f"[TELEGRAM] Alerta enviado — Sala {sala['sala_id']} vazia há {tempo_vazia}s")
+
+
+def _parse_timer(texto: str) -> int | None:
+    import re
+    match = re.search(r"(\d+)\s*(hora[s]?|minuto[s]?|segundo[s]?|h|min|s\b)", texto)
+    if not match:
+        return None
+    valor = int(match.group(1))
+    unidade = match.group(2)
+    if unidade.startswith("hora") or unidade == "h":
+        return valor * 3600
+    if unidade.startswith("minuto") or unidade == "min":
+        return valor * 60
+    return valor
 
 
 async def _texto_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -121,8 +136,9 @@ async def _texto_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if estado:
             luz = "💡 *Ligada*" if estado["luminosidade"] else "🌑 *Desligada*"
             ocupacao = "🚶 *Ocupada*" if estado["ocupada"] else "💤 *Vazia*"
+            timeout_atual = await redis_service.get_timeout() or settings.timeout_sala
             await update.message.reply_text(
-                f"📊 *Estado atual — Sala {sala_id}*\n\nLuz: {luz}\nOcupação: {ocupacao}",
+                f"📊 *Estado atual — Sala {sala_id}*\n\nLuz: {luz}\nOcupação: {ocupacao}\n⏱ Timer de alerta: *{_formatar_tempo(timeout_atual)}*",
                 parse_mode="Markdown",
             )
             luz_txt = "ligada" if estado["luminosidade"] else "desligada"
@@ -130,9 +146,31 @@ async def _texto_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await mqtt_service.log_event(sala_id, f"📊 Estado consultado — Luz {luz_txt}, sala {ocup_txt}", tipo="sistema")
         else:
             await update.message.reply_text(f"❓ Sala {sala_id} não encontrada.", parse_mode="Markdown")
+    elif "timer" in texto:
+        segundos = _parse_timer(texto)
+        if segundos is None or segundos <= 0:
+            await update.message.reply_text(
+                "⚠️ Não entendi o tempo informado.\n\n"
+                "Use um dos formatos:\n"
+                "• `timer 30 segundos`\n"
+                "• `timer 5 minutos`\n"
+                "• `timer 1 hora`",
+                parse_mode="Markdown",
+            )
+            return
+        await redis_service.set_timeout(segundos)
+        await update.message.reply_text(
+            f"⏱ Timer de alerta configurado para *{_formatar_tempo(segundos)}*.",
+            parse_mode="Markdown",
+        )
+        await mqtt_service.log_event(sala_id, f"⏱ Timer de alerta alterado para {_formatar_tempo(segundos)}", tipo="sistema")
     else:
         await update.message.reply_text(
-            "❓ Comando não reconhecido. Envie *ligar*, *desligar* ou *status*.",
+            "❓ Comando não reconhecido. Envie:\n"
+            "• *ligar* — liga a iluminação\n"
+            "• *desligar* — desliga a iluminação\n"
+            "• *status* — estado atual da sala\n"
+            "• *timer 5 minutos* — configura o tempo de alerta",
             parse_mode="Markdown",
         )
 

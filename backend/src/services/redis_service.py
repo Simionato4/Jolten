@@ -76,6 +76,17 @@ async def get_room_info(sala_id: str) -> dict | None:
     return json.loads(raw) if raw else None
 
 
+async def get_timeout() -> int | None:
+    r = get_redis()
+    raw = await r.get("config:timeout_sala")
+    return int(raw) if raw else None
+
+
+async def set_timeout(segundos: int) -> None:
+    r = get_redis()
+    await r.set("config:timeout_sala", str(segundos))
+
+
 async def close() -> None:
     global _redis
     if _redis:
