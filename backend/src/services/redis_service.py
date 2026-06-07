@@ -85,6 +85,9 @@ async def get_timeout() -> int | None:
 async def set_timeout(segundos: int) -> None:
     r = get_redis()
     await r.set("config:timeout_sala", str(segundos))
+    keys = await r.keys("alerta_enviado:*")
+    if keys:
+        await r.delete(*keys)
 
 
 async def close() -> None:
