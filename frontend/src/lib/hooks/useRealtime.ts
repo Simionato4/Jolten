@@ -10,6 +10,14 @@ export function useRealtime() {
   const [connected, setConnected] = useState(false)
   const esRef = useRef<EventSource | null>(null)
 
+  // Pré-carrega salas via REST para evitar flash de "Nenhuma sala" enquanto SSE conecta
+  useEffect(() => {
+    fetch(`${BASE}/rooms`)
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data) && data.length > 0) setRooms(data) })
+      .catch(() => null)
+  }, [])
+
   useEffect(() => {
     function connect() {
       const es = new EventSource(`${BASE}/events`)
@@ -20,13 +28,11 @@ export function useRealtime() {
       es.onmessage = (e) => {
         const data = JSON.parse(e.data)
 
-        // Ressincronização inicial ou reconexão (IMPORT-004)
         if (data.tipo === 'sync') {
           setRooms(data.salas)
           return
         }
 
-        // Atualização incremental de uma sala
         setRooms((prev) => {
           const idx = prev.findIndex((r) => r.sala_id === data.sala_id)
           if (idx === -1) {
@@ -41,7 +47,6 @@ export function useRealtime() {
       es.onerror = () => {
         setConnected(false)
         es.close()
-        // Reconnect após 3s
         setTimeout(connect, 3000)
       }
     }

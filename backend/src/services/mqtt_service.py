@@ -5,10 +5,23 @@ import aiomqtt
 from src.config import settings
 from src.services import influx_service, redis_service
 
-# Fila compartilhada com o endpoint SSE (Tópico 5)
-sse_queue: asyncio.Queue = asyncio.Queue()
-
+_subscribers: set[asyncio.Queue] = set()
 _task: asyncio.Task | None = None
+
+
+def subscribe() -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue()
+    _subscribers.add(q)
+    return q
+
+
+def unsubscribe(q: asyncio.Queue) -> None:
+    _subscribers.discard(q)
+
+
+async def _broadcast(event: dict) -> None:
+    for q in list(_subscribers):
+        await q.put(event)
 
 
 async def _handle_message(topic: str, payload: str) -> None:
@@ -37,7 +50,7 @@ async def _handle_message(topic: str, payload: str) -> None:
                 from src.services import telegram_service
                 await telegram_service.send_movement_alert(sala_id)
 
-        await sse_queue.put({"sala_id": sala_id, "ocupada": ocupada, "tipo": "ocupacao"})
+        await _broadcast({"sala_id": sala_id, "ocupada": ocupada, "tipo": "ocupacao"})
         print(f"[MQTT] sala/{sala_id}/ocupacao → {ocupada}")
 
     elif tipo == "luminosidade":
@@ -57,7 +70,7 @@ async def _handle_message(topic: str, payload: str) -> None:
         if luz_acendeu or luz_apagou:
             await redis_service.get_redis().delete(f"alerta_enviado:{sala_id}")
 
-        await sse_queue.put({"sala_id": sala_id, "luminosidade": acesa, "tipo": "luminosidade"})
+        await _broadcast({"sala_id": sala_id, "luminosidade": acesa, "tipo": "luminosidade"})
         print(f"[MQTT] sala/{sala_id}/luminosidade → {acesa}")
 
     elif tipo == "info":
@@ -84,7 +97,7 @@ async def _handle_message(topic: str, payload: str) -> None:
             log_tipo = "sistema"
         timestamp = datetime.now(timezone.utc).isoformat()
         await redis_service.add_log(sala_id, payload, log_tipo)
-        await sse_queue.put({"sala_id": sala_id, "mensagem": payload, "timestamp": timestamp, "tipo": "log", "log_tipo": log_tipo})
+        await _broadcast({"sala_id": sala_id, "mensagem": payload, "timestamp": timestamp, "tipo": "log", "log_tipo": log_tipo})
         print(f"[LOG] sala/{sala_id} → {payload}")
 
 
@@ -92,7 +105,7 @@ async def log_event(sala_id: str, mensagem: str, tipo: str = "sistema") -> None:
     from datetime import datetime, timezone
     timestamp = datetime.now(timezone.utc).isoformat()
     await redis_service.add_log(sala_id, mensagem, tipo)
-    await sse_queue.put({"sala_id": sala_id, "mensagem": mensagem, "timestamp": timestamp, "tipo": "log", "log_tipo": tipo})
+    await _broadcast({"sala_id": sala_id, "mensagem": mensagem, "timestamp": timestamp, "tipo": "log", "log_tipo": tipo})
 
 
 async def publish(topic: str, payload: str) -> None:
@@ -106,26 +119,35 @@ async def publish(topic: str, payload: str) -> None:
 
 
 async def _run() -> None:
-    print("[MQTT] Conectando ao broker...")
-    async with aiomqtt.Client(
-        hostname=settings.mqtt_broker,
-        port=settings.mqtt_port,
-        username=settings.mqtt_user,
-        password=settings.mqtt_pass,
-    ) as client:
-        await client.subscribe("sala/+/ocupacao")
-        await client.subscribe("sala/+/luminosidade")
-        await client.subscribe("sala/+/log")
-        await client.subscribe("sala/+/info")
-        print("[MQTT] Inscrito em sala/+/ocupacao, sala/+/luminosidade, sala/+/log, sala/+/info")
-
-        async for message in client.messages:
-            topic = str(message.topic)
-            payload = message.payload.decode()
-            try:
-                await _handle_message(topic, payload)
-            except Exception as e:
-                print(f"[MQTT] Erro ao processar {topic}: {e}")
+    retry_delay = 5
+    while True:
+        try:
+            print("[MQTT] Conectando ao broker...")
+            async with aiomqtt.Client(
+                hostname=settings.mqtt_broker,
+                port=settings.mqtt_port,
+                username=settings.mqtt_user,
+                password=settings.mqtt_pass,
+            ) as client:
+                await client.subscribe("sala/+/ocupacao")
+                await client.subscribe("sala/+/luminosidade")
+                await client.subscribe("sala/+/log")
+                await client.subscribe("sala/+/info")
+                print("[MQTT] Inscrito em sala/+/ocupacao, sala/+/luminosidade, sala/+/log, sala/+/info")
+                retry_delay = 5
+                async for message in client.messages:
+                    topic = str(message.topic)
+                    payload = message.payload.decode()
+                    try:
+                        await _handle_message(topic, payload)
+                    except Exception as e:
+                        print(f"[MQTT] Erro ao processar {topic}: {e}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[MQTT] Conexão perdida: {e}. Reconectando em {retry_delay}s...")
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
 
 
 async def start() -> None:
