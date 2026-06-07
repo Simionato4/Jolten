@@ -110,9 +110,12 @@ export default function RoomDetail({ params }: Props) {
           </button>
         </nav>
 
-        <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-xs font-bold text-white select-none">
-          N
-        </div>
+        <img
+          src="/jolteon.png"
+          alt="Jolteon"
+          className="w-10 h-10 rounded-full object-cover object-center"
+          style={{ clipPath: 'circle(50%)' }}
+        />
       </aside>
 
       {/* Main content */}

@@ -1,6 +1,10 @@
-# Jolteon IoT — Monitoramento de Salas em Tempo Real
+<div align="center">
+  <img src="frontend/public/jolteon.png" alt="Jolteon IoT" width="180" style="border-radius:50%;object-fit:cover;" />
 
-Sistema de automação e eficiência energética para ambientes corporativos. Monitora ocupação e iluminação de salas via sensores conectados a um ESP32, exibe o estado em tempo real num dashboard web e envia alertas via Telegram quando uma sala fica vazia com a luz acesa.
+  # Jolteon IoT — Monitoramento de Salas em Tempo Real
+
+  Sistema de automação e eficiência energética para ambientes corporativos. Monitora ocupação e iluminação de salas via sensores conectados a um ESP32, exibe o estado em tempo real num dashboard web e envia alertas via Telegram quando uma sala fica vazia com a luz acesa.
+</div>
 
 ---
 
@@ -20,11 +24,11 @@ Sistema de automação e eficiência energética para ambientes corporativos. Mo
 └───────────────────────────┼─────────────────────────────────┘
                             │ MQTT sobre TCP/IP (Wi-Fi)
                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    RAILWAY (Cloud)                          │
-│                                                             │
+┌────────────────────────────────────────────────────────────┐
+│                    RAILWAY (Cloud)                         │
+│                                                            │
 │  ┌─────────────┐  MQTT  ┌──────────────────────────────┐   │
-│  │  Mosquitto  │◄──────►│     Backend — FastAPI         │   │
+│  │  Mosquitto  │◄──────►│     Backend — FastAPI        │   │
 │  │ MQTT Broker │        │                              │   │
 │  └─────────────┘        │  mqtt_service   (subscreve)  │   │
 │                         │  redis_service  (estado)     │   │
@@ -48,7 +52,7 @@ Sistema de automação e eficiência energética para ambientes corporativos. Mo
                             ▼
                     ┌───────────────┐
                     │    Telegram   │
-                    │ (Bot do Gestor│
+                    │ Bot do Gestor │
                     └───────────────┘
 ```
 
