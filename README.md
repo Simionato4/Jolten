@@ -94,7 +94,34 @@ Desenvolvido em **C com ESP-IDF**.
 |---|---|---|
 | 2 | Sensor PIR — detecção de movimento | Entrada |
 | 4 | Relé — controle da iluminação | Saída |
+| 5 | Chave DPDT — sinal do interruptor físico | Entrada |
 | 10 | Sensor LDR — detecção de luz | Entrada |
+
+---
+
+### Controle duplo — Interruptor físico + Telegram
+
+O sistema integra uma **chave DPDT (Double Pole Double Throw)** que permite controlar a iluminação tanto fisicamente quanto via Telegram, sem que um sobrescreva o outro.
+
+#### Como funciona
+
+A chave DPDT possui dois polos que atuam simultaneamente ao ser acionada:
+
+| Polo | Ligação | Função |
+|---|---|---|
+| **Polo 1 (AC)** | COM → fase / NO → circuito do relé/lâmpada | Controla o circuito elétrico da luz |
+| **Polo 2 (sinal)** | COM → 3.3 V do ESP32 / NO → GPIO 5 | Informa ao ESP32 o estado físico da chave |
+
+Quando o interruptor é acionado, os dois polos comutam juntos: a luz é ligada/desligada diretamente pelo polo AC, e o polo de sinal envia simultaneamente `HIGH` ou `LOW` ao GPIO 5 do ESP32.
+
+#### Lógica de controle sem conflito
+
+O ESP32 monitora continuamente o GPIO 5 para saber a posição física da chave. A lógica garante que os dois meios de controle coexistam:
+
+- **Acionamento físico** → o ESP32 detecta a mudança no GPIO 5, atualiza o estado interno e publica no MQTT — o dashboard e o Telegram refletem o novo estado automaticamente.
+- **Acionamento remoto (Telegram ou dashboard)** → o ESP32 inverte o sinal esperado da chave. Um único toque no interruptor físico é suficiente para retornar ao controle manual, pois o sistema passa a tratar aquela posição como o novo estado de referência.
+
+Dessa forma, ligar pelo Telegram não "briga" com o interruptor na parede — ambos sempre convergem para um estado consistente com um toque.
 
 ---
 
