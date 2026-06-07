@@ -98,7 +98,7 @@ async def _check_timeouts(context: ContextTypes.DEFAULT_TYPE) -> None:
             ja_enviado = await r.get(alerta_key)
             if not ja_enviado:
                 await send_alert(sala["sala_id"], tempo_vazia)
-                await r.set(alerta_key, "1", ex=settings.timeout_sala * 2)
+                await r.set(alerta_key, "1", ex=timeout)
                 print(f"[TELEGRAM] Alerta enviado — Sala {sala['sala_id']} vazia há {tempo_vazia}s")
 
 
