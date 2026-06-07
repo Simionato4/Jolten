@@ -162,19 +162,31 @@ O bot roda dentro do backend e responde apenas ao `GESTOR_CHAT_ID` configurado.
 |---|---|
 | `ligar` | Liga a iluminação da Sala 101 via MQTT |
 | `desligar` | Desliga a iluminação da Sala 101 via MQTT |
-| `status` | Retorna o estado atual de ocupação e iluminação |
+| `status` | Retorna o estado atual de ocupação, iluminação e timer configurado |
+| `timer 30 segundos` | Configura o tempo de alerta para 30 segundos |
+| `timer 5 minutos` | Configura o tempo de alerta para 5 minutos |
+| `timer 1 hora` | Configura o tempo de alerta para 1 hora |
+
+**Configuração do timer de alerta:**
+
+O timer define por quanto tempo uma sala pode ficar vazia com a luz acesa antes de o bot enviar um alerta. O valor padrão é definido pela variável de ambiente `TIMEOUT_SALA`, mas pode ser alterado a qualquer momento via Telegram — sem necessidade de redeploy.
+
+O novo valor é salvo no Redis e passa a valer imediatamente no próximo ciclo de verificação. Enquanto a sala permanecer no estado de alerta, o bot reenvia a mensagem no mesmo intervalo configurado.
+
+Formatos aceitos: `segundos`, `minutos`, `horas` (e abreviações `s`, `min`, `h`). Mensagens fora desse formato recebem uma resposta de aviso com exemplos corretos.
 
 **Alerta automático:**
 
 ```
-Sala vazia + luz acesa por mais de TIMEOUT_SALA segundos
+Sala vazia + luz acesa por mais de [timer configurado]
                         │
                         ▼
       Bot envia mensagem ao gestor com botões inline:
       [ 💡 Manter Ligado ]  [ 🛑 Desligar ]
                         │
-                        ▼
-      Gestor responde → Backend publica MQTT → ESP32 aciona o relé
+                        ├─ Gestor responde → Backend publica MQTT → ESP32 aciona o relé
+                        │
+                        └─ Sem resposta → Bot reenvia o alerta após o mesmo intervalo
 ```
 
 ---
@@ -227,7 +239,7 @@ Serviços disponíveis:
 | `GESTOR_CHAT_ID` | Chat ID do gestor (use `/start` no bot para descobrir) |
 | `API_KEY` | Chave para autenticar comandos remotos |
 | `CORS_ORIGINS` | JSON array com origens permitidas — ex: `["https://jolten.vercel.app"]` |
-| `TIMEOUT_SALA` | Segundos sem movimento para disparar alerta (padrão: `30`) |
+| `TIMEOUT_SALA` | Tempo padrão (em segundos) sem movimento para disparar alerta — pode ser sobrescrito via Telegram sem redeploy |
 
 ### Variáveis de ambiente — Frontend (Vercel)
 
