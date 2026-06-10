@@ -67,7 +67,7 @@ async def _handle_message(topic: str, payload: str) -> None:
         luz_apagou = not acesa and era_acesa
         await redis_service.set_room_state(sala_id, ocupada=ocupada, luminosidade=acesa, reset_timer=luz_acendeu)
 
-        if luz_acendeu or luz_apagou:
+        if luz_acendeu:
             await redis_service.get_redis().delete(f"alerta_enviado:{sala_id}")
 
         await _broadcast({"sala_id": sala_id, "luminosidade": acesa, "tipo": "luminosidade"})

@@ -84,6 +84,8 @@ async def _button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if acao == "desligar":
         await mqtt_service.publish(f"sala/{sala_id}/comando", "OFF")
         await mqtt_service.log_event(sala_id, "🛑 Luz desligada remotamente via Telegram", tipo="remoto")
+        r = redis_service.get_redis()
+        await r.delete(f"alerta_enviado:{sala_id}")
         texto = f"🛑 Cargas da Sala {sala_id} *desligadas* remotamente."
     else:
         await mqtt_service.publish(f"sala/{sala_id}/comando", "ON")
