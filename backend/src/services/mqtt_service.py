@@ -86,6 +86,18 @@ async def _handle_message(topic: str, payload: str) -> None:
         except (json.JSONDecodeError, KeyError):
             pass
 
+    elif tipo == "interruptor":
+        desligado = payload.strip() == "0"
+        if desligado:
+            alerta_key = f"alerta_enviado:{sala_id}"
+            r = redis_service.get_redis()
+            if await r.get(alerta_key):
+                await r.delete(alerta_key)
+                await log_event(sala_id, "🔌 Luz apagada manualmente — alerta cancelado", tipo="alerta")
+                from src.services import telegram_service
+                await telegram_service.send_manual_off_alert(sala_id)
+        return
+
     elif tipo == "log":
         from datetime import datetime, timezone
         p = payload.lower()
@@ -133,6 +145,7 @@ async def _run() -> None:
                 await client.subscribe("sala/+/luminosidade")
                 await client.subscribe("sala/+/log")
                 await client.subscribe("sala/+/info")
+                await client.subscribe("sala/+/interruptor")
                 print("[MQTT] Inscrito em sala/+/ocupacao, sala/+/luminosidade, sala/+/log, sala/+/info")
                 retry_delay = 5
                 async for message in client.messages:

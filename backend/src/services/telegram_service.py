@@ -55,6 +55,16 @@ async def send_alert(sala_id: str, tempo_vazia: int) -> None:
     await mqtt_service.log_event(sala_id, f"⚠️ Alerta enviado — vazia há {_formatar_tempo(tempo_vazia)}", tipo="alerta")
 
 
+async def send_manual_off_alert(sala_id: str) -> None:
+    if _app is None:
+        return
+    await _app.bot.send_message(
+        chat_id=settings.gestor_chat_id,
+        text=f"🔌 *Sala {sala_id}*: luz apagada manualmente pelo interruptor. Alerta cancelado automaticamente.",
+        parse_mode="Markdown",
+    )
+
+
 async def send_movement_alert(sala_id: str) -> None:
     if _app is None:
         return

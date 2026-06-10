@@ -204,9 +204,11 @@ void app_main(void) {
     char topico_pir[64];
     char topico_ldr[64];
     char topico_log[64];
+    char topico_interruptor[64];
     snprintf(topico_pir, sizeof(topico_pir), "sala/%s/ocupacao", SALA_ID);
     snprintf(topico_ldr, sizeof(topico_ldr), "sala/%s/luminosidade", SALA_ID);
     snprintf(topico_log, sizeof(topico_log), "sala/%s/log", SALA_ID);
+    snprintf(topico_interruptor, sizeof(topico_interruptor), "sala/%s/interruptor", SALA_ID);
 
     while (1) {
         int movimento = gpio_get_level(PIR_SENSOR_PIN);
@@ -260,6 +262,7 @@ void app_main(void) {
             char payload_sw[2];
             snprintf(payload_sw, sizeof(payload_sw), "%d", relay_state);
             esp_mqtt_client_publish(client, topico_ldr, payload_sw, 0, 0, 0);
+            esp_mqtt_client_publish(client, topico_interruptor, payload_sw, 0, 0, 0);
 
             if (relay_state) {
                 ESP_LOGI(TAG, "💡 Relé LIGADO via chave física");
