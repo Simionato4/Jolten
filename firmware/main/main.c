@@ -18,6 +18,7 @@
 #define PIR_SENSOR_PIN   2
 #define RELAY_LIGHT_PIN  4
 #define LDR_SENSOR_PIN   10
+#define SWITCH_PIN       5
 
 #define WIFI_CONNECTED_BIT BIT0
 
@@ -25,6 +26,13 @@ static const char *TAG = "SISTEMA_EDGE";
 static esp_mqtt_client_handle_t client = NULL;
 static EventGroupHandle_t s_wifi_event_group;
 static esp_netif_t *s_netif = NULL;
+
+// relay_state espelha o nível atual do relé e é atualizado tanto por comandos remotos
+// quanto pela chave física. last_switch_pos NÃO é atualizado por comandos remotos —
+// essa é a "referência invertida": após qualquer comando remoto, um único toque físico
+// detecta mudança e faz o toggle, sem exigir dois toques para compensar o estado.
+volatile static int relay_state = 1;
+static int last_switch_pos = -1;
 
 // --- WiFi ---
 
@@ -85,11 +93,16 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
             ESP_LOGI(TAG, "📩 Comando recebido: %s → %s", topico, payload);
 
             if (strcmp(payload, "ON") == 0) {
+                // Atualiza relay_state antes de acionar o GPIO para que o loop principal
+                // leia um estado coerente. last_switch_pos é propositalmente preservado
+                // para manter a referência invertida.
+                relay_state = 1;
                 gpio_set_level(RELAY_LIGHT_PIN, 1);
-                ESP_LOGI(TAG, "💡 Relé LIGADO via Telegram");
+                ESP_LOGI(TAG, "💡 Relé LIGADO via remoto");
             } else if (strcmp(payload, "OFF") == 0) {
+                relay_state = 0;
                 gpio_set_level(RELAY_LIGHT_PIN, 0);
-                ESP_LOGI(TAG, "🛑 Relé DESLIGADO via Telegram");
+                ESP_LOGI(TAG, "🛑 Relé DESLIGADO via remoto");
             }
             break;
         }
@@ -162,6 +175,10 @@ void iniciar_gpios(void) {
     gpio_set_direction(LDR_SENSOR_PIN, GPIO_MODE_INPUT);
     gpio_set_pull_mode(LDR_SENSOR_PIN, GPIO_PULLUP_ONLY);
 
+    gpio_reset_pin(SWITCH_PIN);
+    gpio_set_direction(SWITCH_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(SWITCH_PIN, GPIO_PULLDOWN_ONLY);
+
     ESP_LOGI(TAG, "GPIOs inicializados.");
 }
 
@@ -224,6 +241,32 @@ void app_main(void) {
             } else {
                 ESP_LOGI(TAG, "🌑 Luz apagada");
                 esp_mqtt_client_publish(client, topico_log, "Luz apagada", 0, 0, 0);
+            }
+        }
+
+        // Detecta mudança na chave física por borda (não por nível).
+        // Qualquer transição de estado provoca um toggle no relé.
+        // Na primeira iteração (last_switch_pos == -1), apenas inicializa a referência
+        // sem acionar o relé, para não interferir no estado da inicialização.
+        int switch_pos = gpio_get_level(SWITCH_PIN);
+
+        if (last_switch_pos == -1) {
+            last_switch_pos = switch_pos;
+        } else if (switch_pos != last_switch_pos) {
+            last_switch_pos = switch_pos;
+            relay_state = !relay_state;
+            gpio_set_level(RELAY_LIGHT_PIN, relay_state);
+
+            char payload_sw[2];
+            snprintf(payload_sw, sizeof(payload_sw), "%d", relay_state);
+            esp_mqtt_client_publish(client, topico_ldr, payload_sw, 0, 0, 0);
+
+            if (relay_state) {
+                ESP_LOGI(TAG, "💡 Relé LIGADO via chave física");
+                esp_mqtt_client_publish(client, topico_log, "Chave fisica: ligado", 0, 0, 0);
+            } else {
+                ESP_LOGI(TAG, "🛑 Relé DESLIGADO via chave física");
+                esp_mqtt_client_publish(client, topico_log, "Chave fisica: desligado", 0, 0, 0);
             }
         }
 
