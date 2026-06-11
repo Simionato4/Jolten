@@ -63,6 +63,7 @@
    - `sala/101/luminosidade` — `1` (luz acesa) ou `0` (apagada)
    - `sala/101/log` — mensagens textuais de eventos
    - `sala/101/info` — JSON com `uptime`, `rssi` e `ip` (a cada 30s)
+   - `sala/101/interruptor` — `1` (ligado) ou `0` (desligado), publicado sempre que a chave física é acionada
    - Também assina `sala/101/comando` para receber `ON`/`OFF` e acionar o relé
 
 2. O **Backend** (FastAPI no Railway) está inscrito em todos esses tópicos via `aiomqtt`. A cada mensagem:
@@ -118,10 +119,20 @@ Quando o interruptor é acionado, os dois polos comutam juntos: a luz é ligada/
 
 O ESP32 monitora continuamente o GPIO 5 para saber a posição física da chave. A lógica garante que os dois meios de controle coexistam:
 
-- **Acionamento físico** → o ESP32 detecta a mudança no GPIO 5, atualiza o estado interno e publica no MQTT — o dashboard e o Telegram refletem o novo estado automaticamente.
+- **Acionamento físico** → o ESP32 detecta a mudança no GPIO 5, atualiza o estado interno e publica em `sala/101/luminosidade` e `sala/101/interruptor` — o dashboard e o Telegram refletem o novo estado automaticamente.
 - **Acionamento remoto (Telegram ou dashboard)** → o ESP32 inverte o sinal esperado da chave. Um único toque no interruptor físico é suficiente para retornar ao controle manual, pois o sistema passa a tratar aquela posição como o novo estado de referência.
 
 Dessa forma, ligar pelo Telegram não "briga" com o interruptor na parede — ambos sempre convergem para um estado consistente com um toque.
+
+#### Desligamento manual durante um alerta pendente
+
+Se o interruptor físico for usado para apagar a luz **enquanto um alerta de "sala vazia com luz acesa" está em aberto**, o backend identifica que o problema já foi resolvido manualmente:
+
+- O alerta é cancelado automaticamente (a flag de controle no Redis é removida, evitando reenvios).
+- O bot avisa o gestor: *"🔌 Sala 101: luz apagada manualmente pelo interruptor. Alerta cancelado automaticamente."*
+- O evento fica registrado nos logs da sala como `🔌 Luz apagada manualmente — alerta cancelado`.
+
+Esse comportamento espelha o cancelamento já existente para detecção de movimento (veja "Alerta automático" abaixo) — em ambos os casos, qualquer ação que resolva a situação encerra o alerta sem exigir resposta aos botões do Telegram.
 
 ---
 
@@ -217,7 +228,13 @@ Sala vazia + luz acesa por mais de [timer configurado]
                         │
                         ├─ Gestor responde → Backend publica MQTT → ESP32 aciona o relé
                         │
-                        └─ Sem resposta → Bot reenvia o alerta após o mesmo intervalo
+                        ├─ Movimento detectado na sala → alerta cancelado automaticamente,
+                        │  bot avisa "✅ movimento detectado!"
+                        │
+                        ├─ Luz apagada no interruptor físico → alerta cancelado automaticamente,
+                        │  bot avisa "🔌 luz apagada manualmente"
+                        │
+                        └─ Sem resposta nem ação física → Bot reenvia o alerta após o mesmo intervalo
 ```
 
 ---
