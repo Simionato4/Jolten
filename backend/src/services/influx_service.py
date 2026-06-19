@@ -39,7 +39,7 @@ def query_history(sala_id: str, range_minutes: int = 60) -> list[dict]:
         from(bucket: "{settings.influx_bucket}")
           |> range(start: -{range_minutes}m)
           |> filter(fn: (r) => r._measurement == "sensor_pir" and r.sala == "{sala_id}")
-          |> aggregateWindow(every: {window_seconds}s, fn: last, createEmpty: false)
+          |> aggregateWindow(every: {window_seconds}s, fn: max, createEmpty: false)
           |> keep(columns: ["_time", "_value"])
           |> sort(columns: ["_time"])
     """
