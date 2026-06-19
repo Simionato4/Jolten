@@ -8,6 +8,14 @@
 
 ---
 
+## Documentação
+
+O artigo técnico completo do projeto está disponível em [`docs/Artigo_IoT_Jolteon.pdf`](docs/Artigo_IoT_Jolteon.pdf).
+
+Ele detalha a arquitetura, os materiais e métodos, os resultados do protótipo físico, a análise de viabilidade econômica e os trabalhos futuros.
+
+---
+
 ## Arquitetura
 
 ```
