@@ -32,10 +32,14 @@ def write_luminosity(sala_id: str, valor: int) -> None:
 
 
 def query_history(sala_id: str, range_minutes: int = 60) -> list[dict]:
+    # Target ~30 data points regardless of the selected range
+    window_seconds = max(60, (range_minutes * 60) // 30)
+
     flux = f"""
         from(bucket: "{settings.influx_bucket}")
           |> range(start: -{range_minutes}m)
           |> filter(fn: (r) => r._measurement == "sensor_pir" and r.sala == "{sala_id}")
+          |> aggregateWindow(every: {window_seconds}s, fn: last, createEmpty: false)
           |> keep(columns: ["_time", "_value"])
           |> sort(columns: ["_time"])
     """
