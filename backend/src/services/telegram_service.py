@@ -86,6 +86,13 @@ async def _button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await mqtt_service.log_event(sala_id, "🛑 Luz desligada remotamente via Telegram", tipo="remoto")
         r = redis_service.get_redis()
         await r.delete(f"alerta_enviado:{sala_id}")
+        estado_atual = await redis_service.get_room_state(sala_id)
+        if estado_atual:
+            await redis_service.set_room_state(
+                sala_id,
+                ocupada=estado_atual["ocupada"],
+                luminosidade=False,
+            )
         texto = f"🛑 Cargas da Sala {sala_id} *desligadas* remotamente."
     else:
         await mqtt_service.publish(f"sala/{sala_id}/comando", "ON")
