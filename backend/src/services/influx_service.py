@@ -32,20 +32,18 @@ def write_luminosity(sala_id: str, valor: int) -> None:
 
 
 def query_history(sala_id: str, range_minutes: int = 60) -> list[dict]:
-    # Target ~90 data points — 20s base gives enough resolution to see individual pulses
-    window_seconds = max(20, (range_minutes * 60) // 90)
-
     flux = f"""
         from(bucket: "{settings.influx_bucket}")
           |> range(start: -{range_minutes}m)
           |> filter(fn: (r) => r._measurement == "sensor_pir" and r.sala == "{sala_id}")
-          |> aggregateWindow(every: {window_seconds}s, fn: max, createEmpty: false)
+          |> aggregateWindow(every: 60s, fn: max, createEmpty: true)
+          |> fill(value: 0.0)
           |> keep(columns: ["_time", "_value"])
           |> sort(columns: ["_time"])
     """
     tables = _query_api.query(flux, org=settings.influx_org)
     return [
-        {"timestamp": record.get_time().isoformat(), "movimento": record.get_value()}
+        {"timestamp": record.get_time().isoformat(), "movimento": int(record.get_value() or 0)}
         for table in tables
         for record in table.records
     ]

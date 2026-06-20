@@ -66,7 +66,7 @@ export default function RoomDetail({ params }: Props) {
   const { data: history } = useSWR<RoomHistory[]>(
     `/rooms/${id}/history?range_minutes=${rangeMinutes}`,
     fetcher,
-    { refreshInterval: 30000 }
+    { refreshInterval: 60000 }
   )
 
   const minutos = room ? Math.floor(room.tempo_vazia / 60) : 0
