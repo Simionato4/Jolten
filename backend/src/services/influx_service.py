@@ -32,8 +32,8 @@ def write_luminosity(sala_id: str, valor: int) -> None:
 
 
 def query_history(sala_id: str, range_minutes: int = 60) -> list[dict]:
-    # Target ~120 data points for good temporal resolution (~15s granularity at 30min)
-    window_seconds = max(15, (range_minutes * 60) // 120)
+    # Target ~90 data points — 20s base gives enough resolution to see individual pulses
+    window_seconds = max(20, (range_minutes * 60) // 90)
 
     flux = f"""
         from(bucket: "{settings.influx_bucket}")
