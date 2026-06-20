@@ -32,7 +32,7 @@ export function OccupancyChart({ data }: Props) {
             <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
           </linearGradient>
         </defs>
-        <XAxis dataKey="hora" tick={{ fontSize: 11 }} interval="preserveStartEnd" minTickGap={40} />
+        <XAxis dataKey="hora" tick={{ fontSize: 11 }} interval="preserveStartEnd" minTickGap={60} />
         <YAxis
           domain={[0, 1]}
           ticks={[0, 1]}
