@@ -37,13 +37,17 @@ def query_history(sala_id: str, range_minutes: int = 60) -> list[dict]:
           |> range(start: -{range_minutes}m)
           |> filter(fn: (r) => r._measurement == "sensor_pir" and r.sala == "{sala_id}")
           |> aggregateWindow(every: 60s, fn: max, createEmpty: true)
-          |> fill(value: 0.0)
+          |> fill(column: "_value", value: 0)
           |> keep(columns: ["_time", "_value"])
           |> sort(columns: ["_time"])
     """
-    tables = _query_api.query(flux, org=settings.influx_org)
-    return [
-        {"timestamp": record.get_time().isoformat(), "movimento": int(record.get_value() or 0)}
-        for table in tables
-        for record in table.records
-    ]
+    try:
+        tables = _query_api.query(flux, org=settings.influx_org)
+        return [
+            {"timestamp": record.get_time().isoformat(), "movimento": int(record.get_value() or 0)}
+            for table in tables
+            for record in table.records
+        ]
+    except Exception as e:
+        print(f"[INFLUX] Erro na query de histórico: {e}")
+        return []
